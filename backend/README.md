@@ -20,9 +20,9 @@ FastAPI、SQLAlchemy 与 SQLite 构成的 Course Replay MVP 后端。
     cd backend
     $env:UV_CACHE_DIR='.uv-cache'
     uv sync --extra test --python C:\Python314\python.exe
-    uv run uvicorn app.main:app --reload --port 8000
+    uv run uvicorn app.main:app --reload --port 8001
 
-Swagger UI 地址为 http://127.0.0.1:8000/docs 。
+Swagger UI 地址为 http://127.0.0.1:8001/docs 。
 
 启用 AI 前，在仓库根目录 `.env` 填写 `OPENAI_API_KEY` 和 `OPENAI_CHAT_MODEL`。默认 Base URL 为 `https://cdn.cheaprouter.cc/v1`。
 

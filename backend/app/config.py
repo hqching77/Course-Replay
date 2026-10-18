@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     max_upload_mb: int = 100
     max_pages_per_file: int = 40
     document_render_dpi: int = 110
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origins: str = "http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173,http://127.0.0.1:5173"
 
     openai_api_key: str = ""
     openai_base_url: str = "https://cdn.cheaprouter.cc/v1"
