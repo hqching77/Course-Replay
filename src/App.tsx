@@ -230,7 +230,7 @@ function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCour
             <div className="hero-progress"><span style={{ width: '58%' }} /></div>
             <div className="hero-actions">
               <Link className="button light" to={`/courses/${resumeCourse.id}/${resumeTarget.destination}`}>继续课堂重放 <ArrowRight size={17} /></Link>
-              <button className="button ghost hero-dismiss" onClick={dismissResume}><X size={16} />删除</button>
+              <button className="button ghost hero-dismiss" onClick={dismissResume}><X size={16} />取消</button>
             </div>
           </div>
           <div className="hero-visual" aria-hidden="true">
