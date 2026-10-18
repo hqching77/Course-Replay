@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -7,6 +8,12 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     version: str
     ai_configured: bool
+    configured: bool
+    provider: str
+    base_url: str
+    model: str | None
+    office_conversion: bool
+    processing_mode: str
 
 
 class CourseCreate(BaseModel):
@@ -72,3 +79,27 @@ class ChunkRead(BaseModel):
     slide: int | None
     section: str | None
     source_location: str
+
+
+class VisualDocumentInfo(BaseModel):
+    filename: str
+    media_type: str
+    pages: int = 1
+    processing: str
+
+
+class CourseMaterialAnalysis(BaseModel):
+    title: str = "课堂材料分析"
+    summary: str
+    learning_path: list[str] = Field(default_factory=list)
+    key_concepts: list[str] = Field(default_factory=list)
+    review_questions: list[str] = Field(default_factory=list)
+    raw: str | None = None
+
+
+class VisualProcessResponse(BaseModel):
+    documents: list[VisualDocumentInfo]
+    analysis: CourseMaterialAnalysis
+    model: str
+    provider: str = "CheapRouter"
+    usage: dict[str, Any] | None = None

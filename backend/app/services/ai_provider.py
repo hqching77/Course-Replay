@@ -1,3 +1,5 @@
+from typing import Any
+
 from openai import AsyncOpenAI
 
 from app.config import Settings, get_settings
@@ -30,14 +32,35 @@ class AIProvider:
 
     async def chat(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         *,
         temperature: float = 0.2,
+        max_tokens: int | None = None,
     ) -> str:
         client, model = self._require_chat_config()
         response = await client.chat.completions.create(
             model=model,
             messages=messages,  # type: ignore[arg-type]
             temperature=temperature,
+            max_tokens=max_tokens,
         )
         return response.choices[0].message.content or ""
+
+    async def analyze_visual_materials(
+        self,
+        content: list[dict[str, Any]],
+        *,
+        system_prompt: str,
+    ) -> tuple[str, dict[str, Any] | None]:
+        client, model = self._require_chat_config()
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content},
+            ],  # type: ignore[arg-type]
+            temperature=0.2,
+            max_tokens=2500,
+        )
+        usage = response.usage.model_dump() if response.usage else None
+        return response.choices[0].message.content or "", usage

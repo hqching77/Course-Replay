@@ -3,6 +3,8 @@ from pathlib import Path
 
 os.environ["DATABASE_URL"] = "sqlite:///./data/test_course_replay.db"
 os.environ["ARTIFACTS_DIR"] = "./data/test_artifacts"
+os.environ["OPENAI_API_KEY"] = ""
+os.environ["OPENAI_CHAT_MODEL"] = ""
 
 import pytest
 from fastapi.testclient import TestClient

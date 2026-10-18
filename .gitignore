@@ -2,6 +2,7 @@
 .venv/
 .uv-cache/
 backend/.uv-cache/
+backend/.pip-cache/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -10,5 +11,8 @@ data/
 backend/data/
 frontend/node_modules/
 frontend/dist/
+node_modules/
+dist/
+*.tsbuildinfo
 *.log
 .DS_Store

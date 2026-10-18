@@ -1,6 +1,22 @@
 
 # Course Replay 初步开发主 Prompt
 
+> **当前初版**：已整合 React 前端与队友的 FastAPI 后端。上传图片时直接交给视觉模型；PDF 会渲染为逐页图片；PPTX/DOCX 会先用 LibreOffice 转为 PDF，再将完整页面交给模型，全程不执行 OCR。普通演示数据保存在浏览器 `localStorage`，真实材料分析通过 CheapRouter 完成。
+>
+> ```bash
+> npm install
+> # 终端 1：启动后端
+> cd backend
+> uv sync --extra test
+> uv run uvicorn app.main:app --reload --port 8000
+>
+> # 终端 2：启动前端
+> npm run dev
+> # 生产构建：npm run build
+> ```
+>
+> 在根目录 `.env` 中填写 `OPENAI_API_KEY` 和 `OPENAI_CHAT_MODEL`。`OPENAI_BASE_URL` 已配置为 `https://cdn.cheaprouter.cc/v1`；`.env` 已被 Git 忽略。
+
 使用方式：把本文“Prompt 正文”完整交给 Codex、Claude Code、Cursor Agent 等可读写仓库的编码 Agent，并让它在 Course-Replay 仓库根目录执行。
 
 ---
