@@ -2,7 +2,6 @@ import { Dispatch, FormEvent, ReactNode, SetStateAction, useEffect, useMemo, use
 import {
   ArrowLeft,
   ArrowRight,
-  BarChart3,
   BookOpen,
   Bot,
   BrainCircuit,
@@ -21,7 +20,6 @@ import {
   Library,
   Lightbulb,
   Link as LinkIcon,
-  ListChecks,
   MessageSquareText,
   MoreHorizontal,
   Network,
@@ -44,7 +42,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
-import { Course, CourseAnalysis, KnowledgeNode, KnowledgeTier, TIER_META, deriveKnowledgeMap, knowledgeNodes, loadCourses, loadMastery, saveCourses, saveMastery } from './data'
+import { Course, CourseAnalysis, KnowledgeNode, KnowledgeTier, TIER_META, deriveKnowledgeMap, knowledgeNodes, loadCourses, loadMastery, saveCourses } from './data'
 
 const MARKDOWN_PLUGINS = { remarkPlugins: [remarkGfm, remarkMath], rehypePlugins: [rehypeKatex] }
 const TIER_ORDER: KnowledgeTier[] = ['prereq', 'core', 'advanced']
@@ -106,8 +104,6 @@ function App() {
           <Route path="/" element={<Dashboard courses={courses} setCourses={setCourses} notify={notify} />} />
           <Route path="/courses/:courseId" element={<CourseDetail courses={courses} setCourses={setCourses} notify={notify} />} />
           <Route path="/courses/:courseId/replay" element={<Replay courses={courses} setCourses={setCourses} notify={notify} />} />
-          <Route path="/courses/:courseId/review" element={<Review courses={courses} notify={notify} />} />
-          <Route path="/courses/:courseId/progress" element={<Progress courses={courses} />} />
           <Route path="/settings" element={<SettingsPage notify={notify} />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
@@ -134,15 +130,7 @@ function Sidebar() {
       <nav className="nav-main">
         <NavItem to="/" end icon={<LayoutDashboard size={18} />} label="课程空间" />
         <NavItem to={`/courses/${courseId}/replay`} icon={<BrainCircuit size={18} />} label="课堂重放" />
-        <NavItem to={`/courses/${courseId}/review`} icon={<ListChecks size={18} />} label="复习工坊" />
-        <NavItem to={`/courses/${courseId}/progress`} icon={<BarChart3 size={18} />} label="我的学习" />
       </nav>
-      <div className="sidebar-label">当前学期</div>
-      <div className="semester-card">
-        <div className="semester-row"><span>2026 秋</span><ChevronDown size={15} /></div>
-        <div className="semester-progress"><span style={{ width: '58%' }} /></div>
-        <small>第 8 周 · 共 16 周</small>
-      </div>
       <div className="sidebar-bottom">
         <NavItem to="/settings" icon={<Settings size={18} />} label="AI 与偏好设置" />
         <div className="profile">
@@ -206,27 +194,13 @@ function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCour
       </section>
 
       <section className="section-block">
-        <div className="section-heading"><div><h2>我的课程</h2><p>每门课都有独立的知识路径与学习记录</p></div><button className="text-button">查看全部 <ArrowRight size={15} /></button></div>
+        <div className="section-heading"><div><h2>我的课程</h2><p>每门课都有独立的材料库与知识路径</p></div><button className="text-button">查看全部 <ArrowRight size={15} /></button></div>
         <div className="course-grid">
           {courses.map((course) => <CourseCard key={course.id} course={course} />)}
           <button className="new-course-card" onClick={() => setShowCreate(true)}><span><Plus size={22} /></span><strong>创建新课程</strong><small>导入课件，开始构建知识路径</small></button>
         </div>
       </section>
 
-      <section className="lower-grid">
-        <div className="panel activity-panel">
-          <div className="section-heading compact"><div><h2>最近活动</h2></div><button className="icon-button small"><MoreHorizontal size={17} /></button></div>
-          <Activity icon={<Check size={15} />} color="green" title="完成「布尔代数」知识检验" meta="数字电路基础 · 今天 14:28" badge="掌握度 +15%" />
-          <Activity icon={<MessageSquareText size={15} />} color="blue" title="探索：为什么德摩根定律可以推广？" meta="数字电路基础 · 今天 14:12" />
-          <Activity icon={<FileText size={15} />} color="orange" title="生成期中复习题单" meta="信号与系统 · 昨天 21:08" badge="12 道题" />
-        </div>
-        <div className="panel focus-panel">
-          <span className="pill amber"><Sparkles size={13} />AI 学习建议</span>
-          <h3>先补上“卡诺图相邻项”</h3>
-          <p>最近两次回答都在边界环绕规则上出错。花 6 分钟补齐这个前置知识，再继续组合逻辑设计。</p>
-          <Link to="/courses/digital-circuits/replay" className="text-link">进入针对性复习 <ArrowRight size={15} /></Link>
-        </div>
-      </section>
       {showCreate && <CreateCourseModal onClose={() => setShowCreate(false)} onCreate={(course) => { setCourses([...courses, course]); setShowCreate(false); notify('课程已创建，可以导入材料了') }} />}
     </div>
   )
@@ -249,10 +223,6 @@ function CourseCard({ course }: { course: Course }) {
   )
 }
 
-function Activity({ icon, color, title, meta, badge }: { icon: ReactNode; color: string; title: string; meta: string; badge?: string }) {
-  return <div className="activity-row"><span className={`activity-icon ${color}`}>{icon}</span><div><strong>{title}</strong><small>{meta}</small></div>{badge && <span className="activity-badge">{badge}</span>}</div>
-}
-
 function CreateCourseModal({ onClose, onCreate }: { onClose: () => void; onCreate: (course: Course) => void }) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -271,7 +241,7 @@ function useCourse(courses: Course[]) {
 }
 
 function CourseSubnav({ course }: { course: Course }) {
-  return <div className="course-subnav"><NavLink end to={`/courses/${course.id}`}>材料库</NavLink><NavLink to={`/courses/${course.id}/replay`}>课堂重放</NavLink><NavLink to={`/courses/${course.id}/review`}>复习工坊</NavLink><NavLink to={`/courses/${course.id}/progress`}>学习记录</NavLink></div>
+  return <div className="course-subnav"><NavLink end to={`/courses/${course.id}`}>材料库</NavLink><NavLink to={`/courses/${course.id}/replay`}>课堂重放</NavLink></div>
 }
 
 function CourseDetail({ courses, setCourses, notify }: { courses: Course[]; setCourses: Dispatch<SetStateAction<Course[]>>; notify: (message: string) => void }) {
@@ -551,9 +521,6 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
   const askInputRef = useRef<HTMLTextAreaElement>(null)
   const [selected, setSelected] = useState('')
   const [activeMaterialId, setActiveMaterialId] = useState('')
-  const [answer, setAnswer] = useState<string | null>(null)
-  const [submitted, setSubmitted] = useState(false)
-  const [mastery, setMastery] = useState(loadMastery)
   const [chat, setChat] = useState('')
   const [chatQuote, setChatQuote] = useState<string | null>(null)
   const [asking, setAsking] = useState(false)
@@ -652,7 +619,7 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
       if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' })
     })
     return () => cancelAnimationFrame(frame)
-  }, [activeDialogId, asking, latestDialogMessageId, submitted, explorationNodes.length])
+  }, [activeDialogId, asking, latestDialogMessageId, explorationNodes.length])
 
   useEffect(() => {
     const dismissSelectionAsk = () => setSelectionAsk(null)
@@ -726,15 +693,6 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
     })
   }
 
-  const submitAnswer = () => {
-    if (!answer) return
-    setSubmitted(true)
-    if (course.analysis) {
-      const next = Math.min(100, mastery + 5)
-      setMastery(next)
-      saveMastery(next)
-    } else if (answer === 'B' && mastery < 77) { setMastery(77); saveMastery(77) }
-  }
   const ask = async () => {
     const prompt = chat.trim()
     const selectedQuote = chatQuote?.trim() || ''
@@ -807,7 +765,6 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
       setAsking(false)
     }
   }
-  const generatedQuestion = course.analysis?.review_questions[0]
   return <div className="replay-page" ref={replayPageRef} onMouseUp={captureTextSelection} onTouchEnd={captureTextSelection}>
     {selectionAsk && <button className="selection-ask" style={{ left: selectionAsk.left, top: selectionAsk.top }} onMouseDown={(event) => event.preventDefault()} onClick={quoteSelectionInChat}><MessageSquareText size={14} />问 AI</button>}
     <div className="replay-topbar"><Link to={`/courses/${course.id}`}><ArrowLeft size={16} />{course.title}</Link><div className="replay-location"><span>课堂重放</span><ChevronRight size={14} /><strong>{currentTitle}</strong></div><div className="replay-actions"><span className="saved"><Check size={14} />分析与进度已保存</span><button className="icon-button"><PanelLeftClose size={18} /></button></div></div>
@@ -854,15 +811,12 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
       <aside className="ai-column">
         <div className="ai-head"><div><span className="ai-avatar"><Bot size={19} /></span><div><strong>AI 讲师</strong><small><span className="online-dot" />{isMainDialog ? `基于 ${course.materials.filter((item) => item.status === 'ready').length} 份课程材料` : '独立话题'}</small></div></div><div className="dialog-controls"><select aria-label="切换对话" value={activeDialogId} disabled={asking} onChange={(event) => switchDialog(event.target.value)}><option value="main">当前节点</option>{studyDialogs.map((dialog) => <option key={dialog.id} value={dialog.id}>{dialog.title}</option>)}</select><button type="button" disabled={asking} onClick={createDialog} title="开启新对话"><Plus size={14} /><span>新对话</span></button></div></div>
         <div className="chat-scroll" ref={chatScrollRef}>
-          {isMainDialog && <>
-          <div className="ai-message"><p>{course.analysis ? trimText(course.analysis.summary, 320) : <>观察这个卡诺图。橙色圈跨过了左右边界——因为卡诺图的列按 <strong>00、01、11、10</strong> 排列，首尾依然只相差一个变量。</>}</p><div className="citation-row">{course.materials.slice(0, 2).map((material, index) => <button key={material.id}>[{index + 1}] {material.name}</button>)}</div></div>
-          <div className="ai-message question-card"><span className="question-type">理解检验 · {generatedQuestion ? '基于材料' : '单选题'}</span><p><strong>{generatedQuestion || '为什么卡诺图中最左列与最右列可以视为相邻？'}</strong></p>{generatedQuestion ? <textarea className="review-answer" value={answer || ''} disabled={submitted} onChange={(event) => setAnswer(event.target.value)} placeholder="根据刚才看到的材料写下你的理解…" /> : <div className="answer-list">
-            {[['A','它们在图形位置上最近'],['B','格雷码顺序使它们仅有一位变量不同'],['C','所有边界上的格子都彼此相邻'],['D','这是为了让化简结果更短']].map(([key, value]) => <button key={key} disabled={submitted} onClick={() => setAnswer(key)} className={`${answer === key ? 'selected' : ''} ${submitted && key === 'B' ? 'correct' : ''} ${submitted && answer === key && key !== 'B' ? 'wrong' : ''}`}><span>{key}</span>{value}{submitted && key === 'B' && <CheckCircle2 size={16} />}</button>)}
-          </div>}<button className="button primary full" disabled={!answer?.trim() || submitted} onClick={submitAnswer}>{submitted ? '回答已保存' : '提交回答'}</button></div>
-          {submitted && <div className="feedback-card"><div className="feedback-title"><CheckCircle2 size={18} /><strong>{generatedQuestion ? '回答已记录到当前学习进度' : answer === 'B' ? '回答正确，而且理由匹配' : '再看一下格雷码的排列规则'}</strong><span>{generatedQuestion ? '+5%' : answer === 'B' ? '+15%' : '-8%'}</span></div><p>{generatedQuestion ? '这是根据你上传材料生成的开放题；可以继续向 AI 讲师追问并补充答案。' : answer === 'B' ? '这说明你理解了“逻辑相邻”而不是根据图形位置猜测。' : '边界相邻的关键不是物理距离，而是只有一位变量发生变化。'}</p><div className="mastery-change"><span>本知识点掌握度</span><div><i style={{ width: `${mastery}%` }} /></div><strong>{mastery}%</strong></div><div className="feedback-actions"><button onClick={() => setChat(`为什么“${currentTitle}”是这样？`)}>为什么？深入解释</button><button onClick={() => setChat(`学习“${currentTitle}”前需要补什么基础？`)}>补充前置知识</button></div></div>}
-          </>}
+          {isMainDialog && <div className="ai-message teacher-intro">
+            <p>我们一起学习 <strong>{currentTitle}</strong>。</p>
+            <p>哪里不理解，直接问我。也可以选中内容引用提问，我会结合课程材料帮你讲清楚。</p>
+          </div>}
           {!isMainDialog && dialogMessages.length === 0 && <div className="dialog-empty"><span><MessageSquareText size={20} /></span><strong>{activeDialog?.title || '新对话'}</strong><p>这是一个独立话题，不会混入上面的节点问答。直接输入你的问题即可。</p></div>}
-          {dialogMessages.map((message) => message.role === 'user' ? <div className={`user-message ${message.quote ? 'with-quote' : ''}`} key={message.id}>{message.quote && <div className="message-selection"><span><MessageSquareText size={12} />Selection</span><p>{message.quote}</p></div>}<div className="user-prompt">{message.content}</div></div> : <div className="ai-message compact-message" key={message.id}><p>{message.content}</p>{message.nodeId && <button className="topology-jump" onClick={() => setSelected(message.nodeId!)}><GitBranchIcon />已加入拓扑图 · 点击定位</button>}</div>)}
+          {dialogMessages.map((message) => message.role === 'user' ? <div className={`user-message ${message.quote ? 'with-quote' : ''}`} key={message.id}>{message.quote && <div className="message-selection"><span><MessageSquareText size={12} />Selection</span><p>{message.quote}</p></div>}<div className="user-prompt">{message.content}</div></div> : <div className="ai-message compact-message" key={message.id}><Markdown>{message.content}</Markdown>{message.nodeId && <button className="topology-jump" onClick={() => setSelected(message.nodeId!)}><GitBranchIcon />已加入拓扑图 · 点击定位</button>}</div>)}
           {asking && <div className="ai-message compact-message thinking-message"><span className="mini-spinner" /><p>正在结合当前节点判断是否需要扩展知识拓扑…</p></div>}
         </div>
         <div className="ask-box"><div className="quick-prompts"><button onClick={() => setChat(`换一个类比解释“${currentTitle}”`)}>换个类比</button><button onClick={() => setChat(`基于“${currentTitle}”给我一道变式题`)}>来道变式</button><button onClick={() => setChat(`学习“${currentTitle}”前需要补什么基础？`)}>探索前置知识</button></div><div className={`ask-input ${chatQuote ? 'has-selection' : ''}`}>{chatQuote && <div className="composer-selection"><div><p>{chatQuote}</p><span><MessageSquareText size={12} />Selection</span></div><button type="button" aria-label="移除引用" title="移除引用" onClick={() => setChatQuote(null)}><X size={14} /></button></div>}<div className="composer-entry"><textarea ref={askInputRef} value={chat} disabled={asking} onChange={(e) => setChat(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void ask() } }} placeholder={chatQuote ? '询问关于所选内容的问题…' : isMainDialog ? '针对当前节点追问；也可以选中文字直接问 AI…' : '输入这个独立话题的问题…'} /><button className="composer-send" onClick={() => void ask()} disabled={(!chat.trim() && !chatQuote) || asking}>{asking ? <RefreshCw className="spin-icon" size={16} /> : <ArrowRight size={18} />}</button></div></div><small>{isMainDialog ? '选中文字可引用提问；AI 会判断是否扩展拓扑' : '当前对话与节点问答分开保存'}</small></div>
@@ -872,32 +826,6 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
 }
 
 function GitBranchIcon() { return <Network size={14} /> }
-
-function Review({ courses, notify }: { courses: Course[]; notify: (message: string) => void }) {
-  const course = useCourse(courses)
-  const [tab, setTab] = useState<'quiz' | 'sheet'>('quiz')
-  const [generated, setGenerated] = useState(false)
-  if (!course) return <NotFound />
-  const recommendedConcepts = course.analysis?.key_concepts.slice(0, 3).map(formatConceptLabel) || ['卡诺图边界相邻', '最小项表达', '竞争与冒险']
-  return <div className="page"><div className="back-row"><Link to={`/courses/${course.id}`}><ArrowLeft size={16} />{course.title}</Link></div><PageHeader title="复习工坊" subtitle="把薄弱点、错题和必会知识组合成一次高效复习。" actions={<button className="button primary" onClick={() => { setGenerated(true); notify(tab === 'quiz' ? '已根据材料生成复习题' : 'Cheatsheet 已生成') }}><Sparkles size={17} />立即生成</button>} /><CourseSubnav course={course} />
-    <div className="review-layout"><section className="panel builder-panel"><div className="mode-switch"><button onClick={() => { setTab('quiz'); setGenerated(false) }} className={tab === 'quiz' ? 'active' : ''}><ListChecks size={18} />复习题单</button><button onClick={() => { setTab('sheet'); setGenerated(false) }} className={tab === 'sheet' ? 'active' : ''}><FileText size={18} />一页 Cheatsheet</button></div><div className="builder-copy"><span className="pill amber"><Sparkles size={13} />{course.analysis ? '根据已上传材料推荐' : '根据你的学习记录推荐'}</span><h2>{tab === 'quiz' ? '生成一次 20 分钟的针对性练习' : '生成一页纸核心知识总结'}</h2><p>{course.analysis ? trimText(course.analysis.summary, 220) : (tab === 'quiz' ? '系统会提高薄弱知识点与历史错题的出现权重。' : '浓缩核心定义、公式、知识联系与易错点，并保留来源引用。')}</p></div><div className="form-grid"><label>知识范围<select><option>{course.analysis?.title || '当前章节：逻辑函数化简'}</option><option>整门课程</option><option>仅薄弱知识点</option></select></label><label>{tab === 'quiz' ? '复习时长' : '内容密度'}<select><option>{tab === 'quiz' ? `材料题 · ${course.analysis?.review_questions.length || 12} 题` : '标准 · 一页 A4'}</option><option>{tab === 'quiz' ? '10 分钟 · 精简模式' : '精简 · 只保留必会项'}</option></select></label><label>难度<select><option>自适应</option><option>基础巩固</option><option>考试挑战</option></select></label><label>内容侧重<select><option>薄弱点优先</option><option>平均覆盖</option><option>错题优先</option></select></label></div><div className="recommend-row"><span><Target size={16} />将重点覆盖</span>{recommendedConcepts.map((concept, index) => <button key={`${concept}-${index}`}>{concept}</button>)}</div></section>
-      <aside className={`panel artifact-preview ${generated ? 'generated' : ''}`}>{generated ? tab === 'quiz' ? <QuizPreview questions={course.analysis?.review_questions} title={course.analysis?.title} /> : <SheetPreview analysis={course.analysis} materialCount={course.materials.length} /> : <><span className="artifact-icon">{tab === 'quiz' ? <ListChecks size={30} /> : <FileText size={30} />}</span><h3>生成内容将在这里预览</h3><p>{course.analysis ? '内容将直接使用当前课程已保存的分析结果。' : '上传材料并完成分析后，可根据知识路径继续生成复习内容。'}</p></>}</aside></div>
-  </div>
-}
-
-function QuizPreview({ questions, title }: { questions?: string[]; title?: string }) { const items = questions?.length ? questions : ['一个四变量卡诺图中，位于四个角的最小项能否合并？']; return <div className="quiz-preview"><div className="preview-head"><span>已生成 · 来自课程材料</span><strong>{title || '期中针对性复习'}</strong><small>{items.length} 题 · AI 分析结果已保存</small></div>{items.slice(0, 3).map((question, index) => <div className="preview-question generated-question" key={`${question}-${index}`}><span>{String(index + 1).padStart(2, '0')} · 开放题</span><p>{question}</p></div>)}<button className="button dark full">开始答题 <ArrowRight size={16} /></button></div> }
-
-function SheetPreview({ analysis, materialCount }: { analysis?: CourseAnalysis; materialCount: number }) { return <div className="sheet-preview"><div className="preview-head"><span>CHEATSHEET · 已保存分析</span><strong>{analysis?.title || '逻辑函数化简'}</strong><small>基于 {materialCount} 份课程材料</small></div><h4>01 · 内容摘要</h4><p>{analysis ? trimText(analysis.summary, 480) : '相邻最小项只有一个变量取值不同，合并后可消去该变量。'}</p><h4>02 · 核心概念</h4><div className="analysis-concepts">{(analysis?.key_concepts.map(formatConceptLabel) || ['相邻项', '格雷码', '函数化简']).map((concept, index) => <span key={`${concept}-${index}`}>{concept}</span>)}</div><h4>03 · 学习路径</h4><p>{(analysis?.learning_path.map((step) => formatLearningStep(step).title) || ['理解概念', '跟随例题', '完成检验']).join(' → ')}</p></div> }
-
-function Progress({ courses }: { courses: Course[] }) {
-  const course = useCourse(courses)
-  const [mastery] = useState(loadMastery)
-  if (!course) return <NotFound />
-  const bars = [42, 48, 45, 54, 61, 68, mastery]
-  const progressNodes = course.analysis?.learning_path.length ? course.analysis.learning_path.map((step, index) => ({ id: `analysis-${index}`, title: formatLearningStep(step).title, mastery: index === 0 ? mastery : Math.max(0, mastery - index * 12) })) : knowledgeNodes
-  const weakConcepts = course.analysis?.key_concepts.slice(0, 2).map(formatConceptLabel) || ['卡诺图边界相邻', '最小项标准形式']
-  return <div className="page"><div className="back-row"><Link to={`/courses/${course.id}`}><ArrowLeft size={16} />{course.title}</Link></div><PageHeader title="我的学习" subtitle="看见每一次真正理解，也看见下一步该往哪里走。" /><CourseSubnav course={course} /><section className="progress-hero"><div><span className="eyebrow">OVERALL MASTERY</span><strong>{mastery}%</strong><p>整体掌握度 · 最近 7 天提升 15%</p></div><div className="trend-chart">{bars.map((bar, index) => <span key={index} style={{ height: `${bar}%` }}><i>{index === bars.length - 1 ? `${bar}%` : ''}</i></span>)}</div><div className="streak"><span><Zap size={18} /></span><strong>7 天</strong><small>连续学习</small></div></section><div className="progress-grid"><section className="panel"><div className="section-heading compact"><div><h2>{course.analysis ? '材料学习路径' : '知识点掌握'}</h2><p>{course.analysis ? '来自已保存的 AI 分析' : '按优先级排序'}</p></div></div><div className="mastery-list">{progressNodes.map((node) => <div key={node.id}><span>{node.title}<small>{node.mastery >= 75 ? '已掌握' : node.mastery > 0 ? '继续巩固' : '待学习'}</small></span><div><i style={{ width: `${node.mastery}%` }} /></div><strong>{node.mastery}%</strong></div>)}</div></section><section className="panel weakness-panel"><div className="section-heading compact"><div><h2>优先补强</h2><p>{course.analysis ? '来自材料关键概念' : '来自错题与探索记录'}</p></div></div>{weakConcepts.map((concept, index) => <div className="weak-item" key={`${concept}-${index}`}><span className={`priority ${index === 0 ? 'high' : 'mid'}`}>{index === 0 ? '高' : '中'}</span><div><strong>{concept}</strong><p>{course.analysis ? '建议在课堂重放中结合原文查看' : '来自历史学习记录'}</p></div><Link to={`/courses/${course.id}/replay`}>去复习</Link></div>)}<div className="branch-summary"><Network size={18} /><div><strong>{course.analysis?.learning_path.length || 3} 个学习阶段</strong><p>学习内容已和当前课程材料关联。</p></div></div></section></div></div>
-}
 
 function SettingsPage({ notify }: { notify: (message: string) => void }) {
   const [checking, setChecking] = useState(false)

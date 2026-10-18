@@ -239,13 +239,14 @@ async def ask_study_question(request: StudyAskRequest) -> StudyAskResponse:
     system_prompt = """你是 Course Replay 的课程导师。请基于给定的课程材料和当前学习节点回答学生问题。
 只返回 JSON，不要使用 Markdown 代码块：
 {
-  "answer": "简洁、可学习的回答，优先用 2-4 个短段落，不超过 500 字",
+  "answer": "使用 Markdown 排版的简洁回答，先直接解答，再用 2-4 个短段落或列表展开，不超过 500 字",
   "add_node": true,
   "node_title": "2-14 字的新拓扑节点标题",
   "relation": "前置知识/深入理解/相关概念/应用",
   "new_dialog": false,
   "dialog_title": "2-12 字的独立话题标题"
 }
+answer 字段内的段落之间保留空行，步骤或并列要点使用有序或无序列表，关键概念可以加粗。不要将整篇回答挤成一段，也不要每句话都加标题。代码和公式使用对应的 Markdown 格式。JSON 字符串中的换行必须正确转义，确保整个响应是有效 JSON。
 只有问题引入了现有拓扑中没有的前置知识、相关概念、应用方向或值得保留的深入分支时，add_node 才为 true。
 换一种说法、简单澄清、重复提问、生成练习题时不要新增节点。node_title 不得与已有节点重复。
 当 allow_new_dialog 为 true，且问题与课程、当前节点和当前对话主题明显无关时，new_dialog 必须为 true，并给出简短 dialog_title。

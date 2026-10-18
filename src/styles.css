@@ -204,7 +204,7 @@ a { color: inherit; text-decoration: none; }
   .sidebar { width: 72px; padding: 25px 11px; }.brand > span:last-child, .nav-item span, .sidebar-label, .semester-card, .profile > div:not(.avatar), .profile svg { display: none; }.brand { padding: 0; justify-content: center; }.nav-item { justify-content: center; }.profile { display: flex; justify-content: center; padding: 15px 0 0; }.main-shell { margin-left: 72px; width: calc(100% - 72px); }.page { padding: 30px 25px 50px; }.hero-card { grid-template-columns: 1fr; }.hero-visual { display: none; }.materials-layout, .review-layout, .settings-grid { grid-template-columns: 1fr; }.right-stack { grid-template-columns: 1fr 1fr; }.replay-grid { grid-template-columns: 210px 1fr; }.ai-column { position: fixed; right: 0; top: 54px; bottom: 0; width: 340px; box-shadow: -18px 0 40px #0009; z-index: 10; }.content-column { padding-right: 340px; }.replay-grid { grid-template-columns: 210px 1fr; }.replay-topbar { grid-template-columns: 210px 1fr auto; }
 }
 @media (max-width: 680px) {
-  .sidebar { position: fixed; inset: auto 0 0 0; width: 100%; height: 61px; flex-direction: row; padding: 7px; border-right: 0; border-top: 1px solid var(--line); }.brand, .sidebar-label, .semester-card, .sidebar-bottom { display: none; }.nav-main { width: 100%; display: grid; grid-template-columns: repeat(4, 1fr); }.nav-item { padding: 8px; }.nav-item.active { box-shadow: inset 0 -2px var(--lime); }.main-shell { margin: 0 0 61px; width: 100%; }.page { padding: 24px 16px 38px; }.page-header { align-items: flex-start; flex-direction: column; }.page-header h1 { font-size: 29px; }.hero-copy { padding: 26px 23px; }.metric-grid { grid-template-columns: 1fr 1fr; }.metric { padding: 14px; }.course-grid, .lower-grid, .overview-strip, .progress-grid, .progress-hero { grid-template-columns: 1fr; }.course-card, .new-course-card { min-height: 230px; }.overview-strip > div { border-right: 0; border-bottom: 1px solid var(--line); }.right-stack { grid-template-columns: 1fr; }.form-grid, .field-row { grid-template-columns: 1fr; }.course-subnav { gap: 13px; overflow-x: auto; }.replay-topbar { grid-template-columns: 1fr auto; }.replay-location { display: none; }.replay-grid { display: block; height: auto; }.path-column { display: none; }.content-column { padding-right: 0; min-height: 570px; }.ai-column { position: relative; width: auto; top: auto; height: 650px; box-shadow: none; border-top: 1px solid var(--line); }.slide-stage { padding: 15px; }.slide-paper { width: 100%; min-height: 330px; padding: 22px; }.kmap-wrap { width: 190px; }.content-nav .button { padding: 8px 10px; }.progress-hero { align-items: stretch; }.trend-chart { margin: 15px 0 22px; }.toast-stack { bottom: 76px; left: 14px; right: 14px; }.toast { justify-content: center; }
+  .sidebar { position: fixed; inset: auto 0 0 0; width: 100%; height: 61px; flex-direction: row; padding: 7px; border-right: 0; border-top: 1px solid var(--line); }.brand, .sidebar-label, .semester-card, .sidebar-bottom { display: none; }.nav-main { width: 100%; display: grid; grid-template-columns: repeat(2, 1fr); }.nav-item { padding: 8px; }.nav-item.active { box-shadow: inset 0 -2px var(--lime); }.main-shell { margin: 0 0 61px; width: 100%; }.page { padding: 24px 16px 38px; }.page-header { align-items: flex-start; flex-direction: column; }.page-header h1 { font-size: 29px; }.hero-copy { padding: 26px 23px; }.metric-grid { grid-template-columns: 1fr 1fr; }.metric { padding: 14px; }.course-grid, .lower-grid, .overview-strip, .progress-grid, .progress-hero { grid-template-columns: 1fr; }.course-card, .new-course-card { min-height: 230px; }.overview-strip > div { border-right: 0; border-bottom: 1px solid var(--line); }.right-stack { grid-template-columns: 1fr; }.form-grid, .field-row { grid-template-columns: 1fr; }.course-subnav { gap: 13px; overflow-x: auto; }.replay-topbar { grid-template-columns: 1fr auto; }.replay-location { display: none; }.replay-grid { display: block; height: auto; }.path-column { display: none; }.content-column { padding-right: 0; min-height: 570px; }.ai-column { position: relative; width: auto; top: auto; height: 650px; box-shadow: none; border-top: 1px solid var(--line); }.slide-stage { padding: 15px; }.slide-paper { width: 100%; min-height: 330px; padding: 22px; }.kmap-wrap { width: 190px; }.content-nav .button { padding: 8px 10px; }.progress-hero { align-items: stretch; }.trend-chart { margin: 15px 0 22px; }.toast-stack { bottom: 76px; left: 14px; right: 14px; }.toast { justify-content: center; }
 }
 
 .api-error { display: flex; gap: 10px; align-items: flex-start; margin-top: 12px; padding: 12px 14px; border: 1px solid #713f38; border-radius: 9px; background: #291917; color: #ff9a7d; }
@@ -331,3 +331,65 @@ a { color: inherit; text-decoration: none; }
   .analysis-result-head { align-items: flex-start; flex-wrap: wrap; }
   .analysis-result-head .analysis-action { width: 100%; margin-left: 0; }
 }
+
+/* Readable teacher conversation, with Markdown kept separate from the reading paper. */
+.ai-column { grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; }
+.ai-head { flex-wrap: wrap; gap: 12px; padding: 16px 20px; }
+.ai-head strong { font-size: 16px; }
+.ai-head small { font-size: 12px; color: #919ba7; }
+.ai-head .dialog-controls { width: 100%; }
+.ai-head .dialog-controls select { flex: 1; width: auto; height: 34px; font-size: 12px; }
+.ai-head .dialog-controls button { height: 34px; padding: 0 10px; font-size: 12px; }
+.chat-scroll { padding: 20px; min-height: 0; scrollbar-gutter: stable; }
+.ai-message { min-width: 0; margin: 0 0 24px; padding: 0; border: 0; border-radius: 0; background: transparent; overflow-wrap: anywhere; }
+.ai-message p { color: #d8dee6; font-size: 16px; line-height: 1.8; }
+.teacher-intro p + p { margin-top: 12px; }
+.teacher-intro { padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+.ai-message .markdown-body { color: #d8dee6; font-size: 16px; line-height: 1.8; }
+.ai-message .markdown-body p { margin: 0 0 16px; font-size: inherit; line-height: inherit; white-space: pre-line; }
+.ai-message .markdown-body > :first-child { margin-top: 0; }
+.ai-message .markdown-body > :last-child { margin-bottom: 0; }
+.ai-message .markdown-body h1,
+.ai-message .markdown-body h2,
+.ai-message .markdown-body h3,
+.ai-message .markdown-body h4 { margin: 24px 0 12px; padding: 0; border: 0; color: #f0f3f7; line-height: 1.5; letter-spacing: 0; }
+.ai-message .markdown-body h1 { font-size: 22px; }
+.ai-message .markdown-body h2 { font-size: 20px; }
+.ai-message .markdown-body h3 { font-size: 18px; }
+.ai-message .markdown-body h4 { font-size: 16px; }
+.ai-message .markdown-body strong { color: #f3f5f8; }
+.ai-message .markdown-body a { color: #a4d5fb; }
+.ai-message .markdown-body ul,
+.ai-message .markdown-body ol { margin: 12px 0 18px; padding-left: 24px; }
+.ai-message .markdown-body li { margin: 8px 0; white-space: pre-line; }
+.ai-message .markdown-body li > p { margin-bottom: 8px; }
+.ai-message .markdown-body li::marker { color: #aebbc9; }
+.ai-message .markdown-body blockquote { margin: 16px 0; padding: 8px 14px; border-left: 3px solid #667580; background: #1a2028; color: #b8c3ce; }
+.ai-message .markdown-body blockquote p { margin: 4px 0; color: inherit; }
+.ai-message .markdown-body code { background: #252d37; color: #e6d3b1; font-size: .88em; }
+.ai-message .markdown-body pre { max-width: 100%; padding: 14px; background: #0b0f14; }
+.ai-message .markdown-body pre code { padding: 0; background: none; color: #e6ebf1; font-size: 13px; }
+.ai-message .markdown-body table { display: block; max-width: 100%; overflow-x: auto; font-size: 14px; box-shadow: none; border-radius: 0; }
+.ai-message .markdown-body thead { background: #202832; }
+.ai-message .markdown-body th { color: #f0f3f7; }
+.ai-message .markdown-body th,
+.ai-message .markdown-body td { padding: 10px 12px; border: 1px solid #353f4c; }
+.ai-message .markdown-body tbody tr:nth-child(even) { background: #171e26; }
+.ai-message .markdown-body hr { border-color: #303943; }
+.user-message { width: fit-content; max-width: 90%; margin: 0 0 24px auto; padding: 12px 16px; border-radius: 18px 18px 4px 18px; background: #252e24; color: #edf1e8; font-size: 16px; line-height: 1.75; overflow-wrap: anywhere; }
+.user-prompt { white-space: pre-wrap; }
+.thinking-message { display: flex; align-items: flex-start; gap: 10px; }
+.thinking-message .mini-spinner { flex-shrink: 0; margin-top: 6px; }
+.thinking-message p { font-size: 14px; color: #9ba8b7; }
+.ai-column .topology-jump { font-size: 12px; padding: 8px 10px; margin-top: 16px; }
+.ask-box { padding: 14px 16px 16px; }
+.quick-prompts { flex-wrap: wrap; gap: 7px; margin-bottom: 12px; }
+.quick-prompts button { padding: 7px 9px; font-size: 12px; }
+.ask-input .composer-entry textarea { min-height: 84px; max-height: 180px; padding: 12px 44px 12px 8px; font-size: 15px; line-height: 1.65; }
+.ask-box > small { margin-top: 10px; font-size: 11px; line-height: 1.5; color: #85909d; }
+.composer-selection p,
+.message-selection p { max-height: 88px; font-size: 13px; line-height: 1.65; }
+.composer-selection span,
+.message-selection > span { font-size: 11px; }
+.dialog-empty strong { font-size: 16px; }
+.dialog-empty p { font-size: 14px; line-height: 1.8; }
