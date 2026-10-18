@@ -44,14 +44,14 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
-import { Course, CourseAnalysis, KnowledgeNode, KnowledgeTier, TIER_META, deriveKnowledgeMap, knowledgeNodes, loadCourses, loadMastery, saveCourses, saveMastery } from './data'
+import { Course, CourseAnalysis, KnowledgeNode, KnowledgeTier, TIER_META, deriveKnowledgeMap, knowledgeNodes, loadCourses, loadMastery, normalizeMarkdown, saveCourses, saveMastery } from './data'
 
 const MARKDOWN_PLUGINS = { remarkPlugins: [remarkGfm, remarkMath], rehypePlugins: [rehypeKatex] }
 const TIER_ORDER: KnowledgeTier[] = ['prereq', 'core', 'advanced']
 
-function Markdown({ children }: { children: string }) {
+function Markdown({ children, className }: { children: string; className?: string }) {
   return (
-    <div className="markdown-body">
+    <div className={className ? `markdown-body ${className}` : 'markdown-body'}>
       <ReactMarkdown remarkPlugins={MARKDOWN_PLUGINS.remarkPlugins} rehypePlugins={MARKDOWN_PLUGINS.rehypePlugins}>
         {children}
       </ReactMarkdown>
@@ -585,7 +585,7 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
   const activeExploration = explorationNodes.find((node) => node.id === selected)
   const explorationAnswer = activeExploration ? (chatHistory.find((message) => message.role === 'assistant' && message.nodeId === activeExploration.id)?.content || '') : ''
   const activeContent = activeKnowledge ? activeKnowledge.content
-    : activeExploration ? `## ${activeExploration.title}\n\n> ❓ ${activeExploration.question}\n\n${explorationAnswer || '_正在生成回答…_'}`
+    : activeExploration ? `## ${activeExploration.title}\n\n> ❓ ${normalizeMarkdown(activeExploration.question)}\n\n${explorationAnswer ? normalizeMarkdown(explorationAnswer) : '_正在生成回答…_'}`
     : (orderedNodes[0]?.content || '## 等待材料分析\n\n上传课件后将在这里生成结构化的学习内容。')
   const currentTitle = activeKnowledge?.title || activeExploration?.title || orderedNodes[Math.max(activeIndex, 0)]?.title || course.analysis?.title || course.title
   const activeTier = activeKnowledge?.tier
@@ -694,12 +694,12 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
       <aside className="ai-column">
         <div className="ai-head"><div><span className="ai-avatar"><Bot size={19} /></span><div><strong>AI 讲师</strong><small><span className="online-dot" />基于 {course.materials.filter((item) => item.status === 'ready').length} 份课程材料</small></div></div><button className="icon-button tiny"><MoreHorizontal size={17} /></button></div>
         <div className="chat-scroll">
-          <div className="ai-message"><p>{course.analysis ? trimText(course.analysis.summary, 320) : <>观察这个卡诺图。橙色圈跨过了左右边界——因为卡诺图的列按 <strong>00、01、11、10</strong> 排列，首尾依然只相差一个变量。</>}</p><div className="citation-row">{course.materials.slice(0, 2).map((material, index) => <button key={material.id}>[{index + 1}] {material.name}</button>)}</div></div>
-          <div className="ai-message question-card"><span className="question-type">理解检验 · {generatedQuestion ? '基于材料' : '单选题'}</span><p><strong>{generatedQuestion || '为什么卡诺图中最左列与最右列可以视为相邻？'}</strong></p>{generatedQuestion ? <textarea className="review-answer" value={answer || ''} disabled={submitted} onChange={(event) => setAnswer(event.target.value)} placeholder="根据刚才看到的材料写下你的理解…" /> : <div className="answer-list">
+          <div className="ai-message">{course.analysis ? <Markdown className="on-dark">{normalizeMarkdown(trimText(course.analysis.summary, 320))}</Markdown> : <p>观察这个卡诺图。橙色圈跨过了左右边界——因为卡诺图的列按 <strong>00、01、11、10</strong> 排列，首尾依然只相差一个变量。</p>}<div className="citation-row">{course.materials.slice(0, 2).map((material, index) => <button key={material.id}>[{index + 1}] {material.name}</button>)}</div></div>
+          <div className="ai-message question-card"><span className="question-type">理解检验 · {generatedQuestion ? '基于材料' : '单选题'}</span><div className="q-text"><Markdown className="on-dark">{normalizeMarkdown(generatedQuestion || '为什么卡诺图中最左列与最右列可以视为相邻？')}</Markdown></div>{generatedQuestion ? <textarea className="review-answer" value={answer || ''} disabled={submitted} onChange={(event) => setAnswer(event.target.value)} placeholder="根据刚才看到的材料写下你的理解…" /> : <div className="answer-list">
             {[['A','它们在图形位置上最近'],['B','格雷码顺序使它们仅有一位变量不同'],['C','所有边界上的格子都彼此相邻'],['D','这是为了让化简结果更短']].map(([key, value]) => <button key={key} disabled={submitted} onClick={() => setAnswer(key)} className={`${answer === key ? 'selected' : ''} ${submitted && key === 'B' ? 'correct' : ''} ${submitted && answer === key && key !== 'B' ? 'wrong' : ''}`}><span>{key}</span>{value}{submitted && key === 'B' && <CheckCircle2 size={16} />}</button>)}
           </div>}<button className="button primary full" disabled={!answer?.trim() || submitted} onClick={submitAnswer}>{submitted ? '回答已保存' : '提交回答'}</button></div>
           {submitted && <div className="feedback-card"><div className="feedback-title"><CheckCircle2 size={18} /><strong>{generatedQuestion ? '回答已记录到当前学习进度' : answer === 'B' ? '回答正确，而且理由匹配' : '再看一下格雷码的排列规则'}</strong><span>{generatedQuestion ? '+5%' : answer === 'B' ? '+15%' : '-8%'}</span></div><p>{generatedQuestion ? '这是根据你上传材料生成的开放题；可以继续向 AI 讲师追问并补充答案。' : answer === 'B' ? '这说明你理解了“逻辑相邻”而不是根据图形位置猜测。' : '边界相邻的关键不是物理距离，而是只有一位变量发生变化。'}</p><div className="mastery-change"><span>本知识点掌握度</span><div><i style={{ width: `${mastery}%` }} /></div><strong>{mastery}%</strong></div><div className="feedback-actions"><button onClick={() => setChat(`为什么“${currentTitle}”是这样？`)}>为什么？深入解释</button><button onClick={() => setChat(`学习“${currentTitle}”前需要补什么基础？`)}>补充前置知识</button></div></div>}
-          {chatHistory.map((message) => message.role === 'user' ? <div className="user-message" key={message.id}>{message.content}</div> : <div className="ai-message compact-message" key={message.id}><p>{message.content}</p>{message.nodeId && <button className="topology-jump" onClick={() => setSelected(message.nodeId!)}><GitBranchIcon />已加入拓扑图 · 点击定位</button>}</div>)}
+          {chatHistory.map((message) => message.role === 'user' ? <div className="user-message" key={message.id}>{message.content}</div> : <div className="ai-message compact-message" key={message.id}><Markdown className="on-dark">{normalizeMarkdown(message.content)}</Markdown>{message.nodeId && <button className="topology-jump" onClick={() => setSelected(message.nodeId!)}><GitBranchIcon />已加入拓扑图 · 点击定位</button>}</div>)}
           {asking && <div className="ai-message compact-message thinking-message"><span className="mini-spinner" /><p>正在结合当前节点判断是否需要扩展知识拓扑…</p></div>}
         </div>
         <div className="ask-box"><div className="quick-prompts"><button onClick={() => setChat(`换一个类比解释“${currentTitle}”`)}>换个类比</button><button onClick={() => setChat(`基于“${currentTitle}”给我一道变式题`)}>来道变式</button><button onClick={() => setChat(`学习“${currentTitle}”前需要补什么基础？`)}>探索前置知识</button></div><div className="ask-input"><textarea value={chat} disabled={asking} onChange={(e) => setChat(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void ask() } }} placeholder="针对当前节点追问；必要时会自动扩展左侧拓扑…" /><button onClick={() => void ask()} disabled={!chat.trim() || asking}>{asking ? <RefreshCw className="spin-icon" size={16} /> : <Send size={17} />}</button></div><small>AI 会判断问题是否值得成为新的知识节点</small></div>
@@ -722,9 +722,9 @@ function Review({ courses, notify }: { courses: Course[]; notify: (message: stri
   </div>
 }
 
-function QuizPreview({ questions, title }: { questions?: string[]; title?: string }) { const items = questions?.length ? questions : ['一个四变量卡诺图中，位于四个角的最小项能否合并？']; return <div className="quiz-preview"><div className="preview-head"><span>已生成 · 来自课程材料</span><strong>{title || '期中针对性复习'}</strong><small>{items.length} 题 · AI 分析结果已保存</small></div>{items.slice(0, 3).map((question, index) => <div className="preview-question generated-question" key={`${question}-${index}`}><span>{String(index + 1).padStart(2, '0')} · 开放题</span><p>{question}</p></div>)}<button className="button dark full">开始答题 <ArrowRight size={16} /></button></div> }
+function QuizPreview({ questions, title }: { questions?: string[]; title?: string }) { const items = questions?.length ? questions : ['一个四变量卡诺图中，位于四个角的最小项能否合并？']; return <div className="quiz-preview"><div className="preview-head"><span>已生成 · 来自课程材料</span><strong>{title || '期中针对性复习'}</strong><small>{items.length} 题 · AI 分析结果已保存</small></div>{items.slice(0, 3).map((question, index) => <div className="preview-question generated-question" key={`${question}-${index}`}><span>{String(index + 1).padStart(2, '0')} · 开放题</span><Markdown>{normalizeMarkdown(question)}</Markdown></div>)}<button className="button dark full">开始答题 <ArrowRight size={16} /></button></div> }
 
-function SheetPreview({ analysis, materialCount }: { analysis?: CourseAnalysis; materialCount: number }) { return <div className="sheet-preview"><div className="preview-head"><span>CHEATSHEET · 已保存分析</span><strong>{analysis?.title || '逻辑函数化简'}</strong><small>基于 {materialCount} 份课程材料</small></div><h4>01 · 内容摘要</h4><p>{analysis ? trimText(analysis.summary, 480) : '相邻最小项只有一个变量取值不同，合并后可消去该变量。'}</p><h4>02 · 核心概念</h4><div className="analysis-concepts">{(analysis?.key_concepts.map(formatConceptLabel) || ['相邻项', '格雷码', '函数化简']).map((concept, index) => <span key={`${concept}-${index}`}>{concept}</span>)}</div><h4>03 · 学习路径</h4><p>{(analysis?.learning_path.map((step) => formatLearningStep(step).title) || ['理解概念', '跟随例题', '完成检验']).join(' → ')}</p></div> }
+function SheetPreview({ analysis, materialCount }: { analysis?: CourseAnalysis; materialCount: number }) { return <div className="sheet-preview"><div className="preview-head"><span>CHEATSHEET · 已保存分析</span><strong>{analysis?.title || '逻辑函数化简'}</strong><small>基于 {materialCount} 份课程材料</small></div><h4>01 · 内容摘要</h4><Markdown>{analysis ? normalizeMarkdown(trimText(analysis.summary, 480)) : '相邻最小项只有一个变量取值不同，合并后可消去该变量。'}</Markdown><h4>02 · 核心概念</h4><div className="analysis-concepts">{(analysis?.key_concepts.map(formatConceptLabel) || ['相邻项', '格雷码', '函数化简']).map((concept, index) => <span key={`${concept}-${index}`}>{concept}</span>)}</div><h4>03 · 学习路径</h4><p>{(analysis?.learning_path.map((step) => formatLearningStep(step).title) || ['理解概念', '跟随例题', '完成检验']).join(' → ')}</p></div> }
 
 function Progress({ courses }: { courses: Course[] }) {
   const course = useCourse(courses)

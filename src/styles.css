@@ -283,3 +283,37 @@ a { color: inherit; text-decoration: none; }
   .markdown-body { font-size: 13.5px; }
   .markdown-body h2 { font-size: 20px; }
 }
+
+/* Markdown 深色变体：AI 讲师对话 / 检验题，与左侧浅色阅读面板统一但适配深色背景 */
+.markdown-body.on-dark { font-size: 11px; line-height: 1.75; color: #b5bdc7; }
+.markdown-body.on-dark h2 { font-size: 15px; color: #e7ecf2; border-bottom-color: #2a333d; margin: 4px 0 10px; }
+.markdown-body.on-dark h3 { font-size: 12.5px; color: #dfe4ea; border-left-color: var(--t-core); margin: 16px 0 7px; }
+.markdown-body.on-dark h4 { font-size: 11.5px; color: #c6cdd6; }
+.markdown-body.on-dark p { margin: 7px 0; }
+.markdown-body.on-dark strong { color: #e9eef4; }
+.markdown-body.on-dark a { color: var(--lime); }
+.markdown-body.on-dark ul, .markdown-body.on-dark ol { padding-left: 18px; margin: 7px 0; }
+.markdown-body.on-dark li { margin: 3px 0; }
+.markdown-body.on-dark li::marker { color: #9ab86a; }
+.markdown-body.on-dark code { background: #242c35; color: #ffb38a; font-size: .9em; }
+.markdown-body.on-dark pre { background: #0c1014; border-color: #262d36; padding: 11px 13px; }
+.markdown-body.on-dark pre code { color: #e6ebf1; font-size: 11px; }
+.markdown-body.on-dark blockquote { background: #1a1f16; border-left-color: #5b7048; color: #a2ae95; padding: 8px 12px; }
+.markdown-body.on-dark table { box-shadow: 0 0 0 1px #2a323c; font-size: 11px; }
+.markdown-body.on-dark thead { background: #1b222a; }
+.markdown-body.on-dark th { color: #dbe1e8; }
+.markdown-body.on-dark th, .markdown-body.on-dark td { border-bottom-color: #262d36; padding: 7px 10px; }
+.markdown-body.on-dark tbody tr:nth-child(even) { background: #141a20; }
+.markdown-body.on-dark hr { border-top-color: #262d36; }
+.ai-message .markdown-body.on-dark > :first-child { margin-top: 0; }
+.ai-message .markdown-body.on-dark > :last-child { margin-bottom: 0; }
+.question-card .q-text .markdown-body { color: #e8edf3; }
+.question-card .q-text .markdown-body p { margin: 0 0 4px; font-weight: 600; }
+.question-card .q-text .markdown-body > :last-child { margin-bottom: 0; }
+
+/* 复习工坊预览（浅色底）内的 markdown 字号收敛 */
+.preview-question .markdown-body, .sheet-preview .markdown-body { font-size: 12px; line-height: 1.65; }
+.preview-question .markdown-body p { margin: 9px 0 0; }
+.preview-question .markdown-body > :first-child { margin-top: 0; }
+.sheet-preview .markdown-body { margin-bottom: 4px; }
+.sheet-preview .markdown-body p { margin: 0; color: #59646a; }

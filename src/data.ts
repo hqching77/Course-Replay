@@ -38,6 +38,28 @@ function splitStep(value: string) {
   }
 }
 
+// Source-file names like add.h / main.cpp — wrapped in backticks. Document
+// extensions (pdf/docx/…) are deliberately excluded so material names stay plain.
+const CODE_FILE_RE = /\b[A-Za-z_][\w-]*\.(?:h|hpp|hh|hxx|cpp|cc|cxx|c|py|js|mjs|cjs|ts|tsx|jsx|java|go|rs|rb|php|sh|bash|bat|ps1|sql|json|ya?ml|toml|ini|cfg|xml|html|css|scss|vue|kt|swift|mm)\b/g
+// Math-like runs: a term (optionally sub/superscripted) joined by operators, or a
+// single braced sub/superscript. Only wrapped when it actually carries _, ^ or =.
+const MATH_RE = /[A-Za-z0-9]+(?:[_^]\{[^}]+\}|[_^][A-Za-z0-9])?(?:\s*[=+\-*/^]\s*[A-Za-z0-9]+(?:[_^]\{[^}]+\}|[_^][A-Za-z0-9])?)+|[A-Za-z0-9]+[_^]\{[^}]+\}/g
+
+/**
+ * Backend analysis text is plain prose: file names and formulas arrive without
+ * Markdown/LaTeX delimiters, so they render as literal text. This adds them
+ * heuristically — `code` for source files, $…$ for sub/superscript formulas —
+ * so every study page renders consistently. Text already containing code or
+ * math delimiters is left untouched.
+ */
+export function normalizeMarkdown(raw: string): string {
+  if (!raw) return raw
+  if (/\$|```|`[^`]+`/.test(raw)) return raw
+  let text = raw.replace(CODE_FILE_RE, (match) => `\`${match}\``)
+  text = text.replace(MATH_RE, (match) => (/[_^=]/.test(match) ? `$${match}$` : match))
+  return text
+}
+
 /**
  * Build a tiered knowledge map from a backend analysis when the course has no
  * authored `knowledgeMap`. The ordered learning path is split into
@@ -61,10 +83,10 @@ export function deriveKnowledgeMap(analysis: CourseAnalysis): KnowledgeNode[] {
     const question = analysis.review_questions?.[index]
     const summary = detail || concepts.slice(0, 2).join('、') || `第 ${index + 1} 个学习阶段`
     const parts: string[] = [`## ${title}`]
-    if (index === 0 && analysis.summary) parts.push(analysis.summary)
-    parts.push(`**本步聚焦**：${detail || title}`)
-    if (concepts.length) parts.push(`### 相关概念\n\n${concepts.map((concept) => `- ${concept}`).join('\n')}`)
-    if (question) parts.push(`### 自测\n\n> ${question}`)
+    if (index === 0 && analysis.summary) parts.push(normalizeMarkdown(analysis.summary))
+    parts.push(`**本步聚焦**：${normalizeMarkdown(detail || title)}`)
+    if (concepts.length) parts.push(`### 相关概念\n\n${concepts.map((concept) => `- ${normalizeMarkdown(concept)}`).join('\n')}`)
+    if (question) parts.push(`### 自测\n\n> ${normalizeMarkdown(question)}`)
     parts.push(`> 本节内容由「${analysis.title}」的 AI 分析整理，可在右侧向 AI 讲师追问以展开更多细节。`)
     return { id: `analysis-${index}`, title, tier, summary, content: parts.join('\n\n') }
   })
