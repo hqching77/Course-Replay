@@ -89,12 +89,21 @@ class VisualDocumentInfo(BaseModel):
     preview_url: str
 
 
+class AnalysisKnowledgeNode(BaseModel):
+    id: str = ""
+    title: str = ""
+    tier: str = "core"  # prereq | core | advanced
+    summary: str = ""
+    content: str = ""  # instructor-style Markdown (GFM + LaTeX)
+
+
 class CourseMaterialAnalysis(BaseModel):
     title: str = "课堂材料分析"
     summary: str
     learning_path: list[str] = Field(default_factory=list)
     key_concepts: list[str] = Field(default_factory=list)
     review_questions: list[str] = Field(default_factory=list)
+    knowledge_map: list[AnalysisKnowledgeNode] = Field(default_factory=list)
     raw: str | None = None
 
 

@@ -447,7 +447,7 @@ function SectionDetail({ courses, setCourses, notify }: { courses: Course[]; set
               status: 'ready',
               analysis: payload.analysis,
               analysisJobId: jobId,
-              knowledgeMap: undefined,
+              knowledgeMap: payload.analysis.knowledge_map?.length ? payload.analysis.knowledge_map : undefined,
               materials: current.materials.map((material) => {
                 if (!materialIds.includes(material.id)) return material
                 const materialIndex = materialIds.indexOf(material.id)
