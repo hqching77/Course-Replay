@@ -119,3 +119,20 @@ class VisualJobStatus(BaseModel):
     message: str
     error: str | None = None
     result: VisualProcessResponse | None = None
+
+
+class StudyAskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    course_title: str = Field(default="课程", max_length=200)
+    current_topic: str = Field(default="", max_length=300)
+    summary: str = Field(default="", max_length=4000)
+    learning_path: list[str] = Field(default_factory=list, max_length=20)
+    key_concepts: list[str] = Field(default_factory=list, max_length=30)
+    existing_nodes: list[str] = Field(default_factory=list, max_length=50)
+
+
+class StudyAskResponse(BaseModel):
+    answer: str
+    add_node: bool = False
+    node_title: str | None = None
+    relation: str | None = None

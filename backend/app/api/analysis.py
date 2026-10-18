@@ -14,6 +14,8 @@ from fastapi.responses import FileResponse
 
 from app.config import get_settings
 from app.schemas import (
+    StudyAskRequest,
+    StudyAskResponse,
     VisualDocumentInfo,
     VisualJobStartResponse,
     VisualJobStatus,
@@ -227,6 +229,59 @@ def list_visual_jobs() -> list[dict[str, object]]:
         }
         for job in sorted(jobs.values(), key=lambda item: item.created_at, reverse=True)
     ]
+
+
+@router.post("/study/ask", response_model=StudyAskResponse)
+async def ask_study_question(request: StudyAskRequest) -> StudyAskResponse:
+    settings = get_settings()
+    if not settings.ai_configured:
+        raise HTTPException(status_code=503, detail="AI 服务尚未配置")
+    system_prompt = """你是 Course Replay 的课程导师。请基于给定的课程分析回答学生问题。
+只返回 JSON，不要 Markdown 代码块：
+{
+  "answer": "简洁、可学习的回答，优先用2-4个短段落，不超过500字",
+  "add_node": true,
+  "node_title": "2-14字的新拓扑节点标题",
+  "relation": "前置知识/深入理解/相关概念/应用"
+}
+只有当问题引入了现有拓扑中没有的前置知识、相关概念、应用方向或值得保留的深入分支时，add_node 才为 true。
+换个说法、简单澄清、重复问题、生成练习题时不要新增节点。node_title 不得与已有节点重复。
+默认使用简体中文。"""
+    context = {
+        "course_title": request.course_title,
+        "current_topic": request.current_topic,
+        "summary": request.summary,
+        "learning_path": request.learning_path,
+        "key_concepts": request.key_concepts,
+        "existing_nodes": request.existing_nodes,
+        "question": request.question,
+    }
+    try:
+        raw = await AIProvider(settings).chat(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
+            ],
+            max_tokens=900,
+        )
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        payload = json.loads(cleaned)
+        answer = str(payload.get("answer") or raw).strip()
+        add_node = bool(payload.get("add_node"))
+        node_title = str(payload.get("node_title") or "").strip()[:30] or None
+        relation = str(payload.get("relation") or "").strip()[:30] or None
+        return StudyAskResponse(
+            answer=answer,
+            add_node=add_node and bool(node_title),
+            node_title=node_title if add_node else None,
+            relation=relation if add_node else None,
+        )
+    except json.JSONDecodeError:
+        return StudyAskResponse(answer=raw.strip(), add_node=False)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"AI 回答失败：{exc}") from exc
 
 
 @router.get("/process/{job_id}", response_model=VisualJobStatus)

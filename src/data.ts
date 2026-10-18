@@ -16,6 +16,20 @@ export interface ProcessingJob {
   message: string
 }
 
+export interface ExplorationNode {
+  id: string
+  title: string
+  parentId: string
+  question: string
+}
+
+export interface StudyMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  nodeId?: string
+}
+
 export interface Material {
   id: string
   name: string
@@ -41,6 +55,8 @@ export interface Course {
   analysis?: CourseAnalysis
   analysisJobId?: string
   processingJob?: ProcessingJob
+  explorationNodes?: ExplorationNode[]
+  chatHistory?: StudyMessage[]
 }
 
 export const defaultCourses: Course[] = [
