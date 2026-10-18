@@ -61,58 +61,49 @@ export interface Course {
 
 export const defaultCourses: Course[] = [
   {
-    id: 'digital-circuits',
-    title: '数字电路基础',
-    code: 'EE201 · 2026 秋',
-    description: '从数制与逻辑门，到组合逻辑电路的分析与设计。',
-    tags: ['电子工程', '必修'],
-    mastery: 68,
-    updated: '今天 14:32',
-    accent: '#c7f45d',
-    materials: [
-      { id: 'm1', name: '第 3 讲 · 组合逻辑电路.pdf', meta: '24 页 · 8.4 MB', type: 'PDF', status: 'ready' },
-      { id: 'm2', name: '课堂板书与例题.pptx', meta: '16 张幻灯片 · 4.1 MB', type: 'PPTX', status: 'ready' },
-      { id: 'm3', name: '我的课堂笔记.md', meta: '1,842 字 · 12 KB', type: 'MD', status: 'ready' },
-    ],
-  },
-  {
-    id: 'signals',
-    title: '信号与系统',
-    code: 'EE203 · 2026 秋',
-    description: '连续时间系统、卷积与频域分析。',
-    tags: ['电子工程'],
-    mastery: 41,
-    updated: '昨天 21:08',
+    id: 'programming-linux',
+    title: '计算机程序设计基础（1）',
+    code: '30230672-4 · 2026 秋',
+    description: '以 Linux 命令、文件系统与 Shell 为主线，完成程序开发的基础准备。',
+    tags: ['Linux', '程序设计'],
+    mastery: 42,
+    updated: '刚刚导入',
     accent: '#7dd3fc',
     materials: [
-      { id: 'm4', name: 'Chapter 2 · LTI Systems.pdf', meta: '37 页 · 11.2 MB', type: 'PDF', status: 'ready' },
-      { id: 'm5', name: '习题课笔记.docx', meta: '8 页 · 240 KB', type: 'DOCX', status: 'ready' },
+      { id: 'linux-supplement-1', name: '补充材料 1：Linux基础.pdf', meta: '26 页 · 2.2 MB · 已解析', type: 'PDF', status: 'ready' },
     ],
-  },
-  {
-    id: 'probability',
-    title: '概率论与随机过程',
-    code: 'MATH240 · 2026 秋',
-    description: '概率模型、随机变量与大数定律。',
-    tags: ['数学基础'],
-    mastery: 23,
-    updated: '10 月 14 日',
-    accent: '#fda4af',
-    materials: [
-      { id: 'm6', name: '随机变量课件.pdf', meta: '31 页 · 7.2 MB', type: 'PDF', status: 'ready' },
-    ],
+    analysis: {
+      title: 'Linux 命令与 Shell 基础',
+      summary: '演示学习路径根据《补充材料 1：Linux基础》已解析的 26 页内容整理，覆盖路径与文件操作、Shell、用户权限、文本处理、脚本及 SSH。',
+      learning_path: [
+        '路径符号与 pwd、ls、cd',
+        '文件与目录操作：mkdir、touch、cp、mv',
+        'Shell、终端与命令执行',
+        '用户、用户组与文件权限',
+        'grep、重定向、管道与 Shell 脚本',
+        '环境变量、SSH 与 tmux',
+      ],
+      key_concepts: ['当前目录与相对路径', 'Shell 与终端的分工', '文件权限 rwx', '标准输入输出重定向', '管道与 grep', 'PATH 环境变量'],
+      review_questions: [
+        '执行 cd ..、cd ~、pwd 分别会带来什么目录变化？请结合相对路径与主目录解释。',
+        '为什么修改 hello.cpp 后需要再次运行 g++ src/hello.cpp -o bin/hello？',
+        'Terminal、CLI 和 Shell 分别负责什么？它们在执行一条命令时如何协作？',
+        'drwxr-xr-x 中的每一组字符分别表示谁的哪些权限？',
+        '比较 >、>> 与管道符 | 的作用及适用场景。',
+      ],
+    },
   },
 ]
 
 export const knowledgeNodes = [
-  { id: 'binary', title: '数制与编码', eyebrow: '前置知识', mastery: 88, duration: '8 分钟', done: true },
-  { id: 'boolean', title: '布尔代数', eyebrow: '核心概念', mastery: 76, duration: '12 分钟', done: true },
-  { id: 'simplify', title: '逻辑函数化简', eyebrow: '当前章节', mastery: 62, duration: '15 分钟', active: true },
-  { id: 'combination', title: '组合逻辑设计', eyebrow: '待学习', mastery: 36, duration: '18 分钟' },
-  { id: 'hazard', title: '竞争与冒险', eyebrow: '拓展', mastery: 0, duration: '10 分钟' },
+  { id: 'filesystem', title: '路径与文件系统', eyebrow: '前置知识', mastery: 72, duration: '8 分钟', done: true },
+  { id: 'commands', title: '常用文件操作命令', eyebrow: '核心概念', mastery: 58, duration: '12 分钟', done: true },
+  { id: 'shell', title: 'Shell、终端与命令执行', eyebrow: '当前章节', mastery: 42, duration: '15 分钟', active: true },
+  { id: 'permissions', title: '用户、用户组与权限', eyebrow: '待学习', mastery: 20, duration: '18 分钟' },
+  { id: 'scripts', title: 'Shell 脚本与环境变量', eyebrow: '拓展', mastery: 0, duration: '10 分钟' },
 ]
 
-const COURSES_KEY = 'course-replay-courses-v1'
+const COURSES_KEY = 'course-replay-courses-linux-demo-v1'
 const MASTERY_KEY = 'course-replay-mastery-v1'
 
 export function loadCourses(): Course[] {

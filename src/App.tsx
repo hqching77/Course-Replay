@@ -59,6 +59,11 @@ function formatLearningStep(value: string) {
   }
 }
 
+function rotateList(list: string[], start: number, count: number) {
+  if (!list.length) return []
+  const from = ((start % list.length) + list.length) % list.length
+  return Array.from({ length: Math.min(count, list.length) }, (_, offset) => list[(from + offset) % list.length])
+}
 function formatConceptLabel(value: string) {
   const clean = value.replace(/^\s*(?:\d+[.、)）:]|[-*•])\s*/, '').trim()
   return trimText(clean.split(/[：:。；;]/)[0] || clean, 18)
@@ -170,11 +175,11 @@ function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCour
       <section className="hero-card">
         <div className="hero-copy">
           <span className="pill lime"><Zap size={13} />继续上次学习</span>
-          <h2>逻辑函数化简</h2>
-          <p>数字电路基础 · 第 3 讲</p>
+          <h2>Shell、终端与命令执行</h2>
+          <p>计算机程序设计基础（1）· 补充材料 1</p>
           <div className="hero-progress-row"><span>课程进度</span><strong>3 / 5</strong></div>
           <div className="hero-progress"><span style={{ width: '58%' }} /></div>
-          <Link className="button light" to="/courses/digital-circuits/replay">继续课堂重放 <ArrowRight size={17} /></Link>
+          <Link className="button light" to="/courses/programming-linux/replay">继续课堂重放 <ArrowRight size={17} /></Link>
         </div>
         <div className="hero-visual" aria-hidden="true">
           <div className="orbit orbit-one" /><div className="orbit orbit-two" />
@@ -225,7 +230,7 @@ function Metric({ icon, label, value, delta, positive }: { icon: ReactNode; labe
 }
 
 function CourseCard({ course }: { course: Course }) {
-  const displayedMastery = course.id === 'digital-circuits' ? loadMastery() : course.mastery
+  const displayedMastery = course.id === 'programming-linux' ? loadMastery() : course.mastery
   return (
     <Link to={`/courses/${course.id}`} className="course-card">
       <div className="course-card-top"><span className="course-swatch" style={{ background: course.accent }} /><button className="icon-button tiny" onClick={(event) => event.preventDefault()}><MoreHorizontal size={16} /></button></div>
@@ -661,15 +666,16 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
       <section className="content-column">
         <div className="content-toolbar"><div><span className="document-badge">{activeMaterial?.type || 'DOC'}</span><strong>{activeMaterial?.name || '还没有可预览的已分析材料'}</strong></div><span>{activeMaterial?.pages ? `${activeMaterial.pages} 页` : course.analysis ? '已完成分析' : '等待上传'}</span></div>
         <div className="slide-stage">
-          {activeMaterial?.previewUrl ? (['PNG', 'JPG', 'JPEG', 'WEBP'].includes(activeMaterial.type) ? <img className="material-preview-media" src={activeMaterial.previewUrl} alt={activeMaterial.name} /> : <iframe className="material-preview-frame" src={activeMaterial.previewUrl} title={activeMaterial.name} />) : <div className="slide-paper">
-            <div className="slide-index">03 <span>COMBINATIONAL LOGIC</span></div>
-            <h2>{course.analysis?.title || '卡诺图化简'}</h2><p className="slide-lead">{course.analysis ? trimText(course.analysis.summary, 140) : '利用相邻项合并，消去变化的变量'}</p>
-            <div className="kmap-wrap"><div className="kmap-label top">AB</div><div className="kmap-label side">CD</div><div className="kmap">
-              {[1,1,0,0, 1,1,0,1, 0,0,1,1, 0,0,1,1].map((value, index) => <span key={index} className={value ? 'one' : ''}>{value}</span>)}
-              <i className="k-loop loop-one" /><i className="k-loop loop-two" />
-            </div></div>
-            <div className="formula">F(A,B,C,D) = <b>AB̅ + CD</b></div>
-            <div className="slide-foot"><span>关键规则</span><p>每个圈包含 2ⁿ 个相邻的 1，允许跨越边界，但不允许对角相邻。</p></div>
+          {activeMaterial?.previewUrl ? (['PNG', 'JPG', 'JPEG', 'WEBP'].includes(activeMaterial.type) ? <img className="material-preview-media" src={activeMaterial.previewUrl} alt={activeMaterial.name} /> : <iframe className="material-preview-frame" src={activeMaterial.previewUrl} title={activeMaterial.name} />) : <div className="slide-paper analysis-slide">
+            <div className="slide-index">{String(Math.max(activeIndex, 0) + 1).padStart(2, '0')} <span>AI 分析 · 学习路径</span></div>
+            <h2>{replayNodes[Math.max(activeIndex, 0)]?.title || course.analysis?.title || '材料分析结果'}</h2>
+            <p className="slide-lead">{course.analysis ? trimText(course.analysis.summary, 150) : '上传课件、笔记或课本并完成分析后，这一步会显示 AI 从材料里读出的内容。'}</p>
+            {course.analysis ? <>
+              <div className="slide-block"><span>本步要点</span><p>{course.analysis.learning_path[Math.max(activeIndex, 0)] || course.analysis.title}</p></div>
+              <div className="slide-block"><span>关键概念</span><div className="slide-chips">{rotateList(course.analysis.key_concepts, Math.max(activeIndex, 0), 3).map((concept, i) => <i key={i}>{formatConceptLabel(concept)}</i>)}</div></div>
+              {course.analysis.review_questions.length > 0 && <div className="slide-block"><span>材料检验题</span><p>{course.analysis.review_questions[Math.max(activeIndex, 0) % course.analysis.review_questions.length]}</p></div>}
+              <div className="slide-foot"><span>材料依据</span><p>{activeMaterial?.name || course.materials[0]?.name || '未关联材料'}{(activeMaterial || course.materials[0])?.pages ? ` · 共 ${(activeMaterial || course.materials[0])!.pages} 页` : ''} · 第 {Math.max(activeIndex, 0) + 1} / {replayNodes.length} 步</p></div>
+            </> : <div className="slide-foot"><span>下一步</span><p>前往材料库上传材料并完成分析，这里会自动填入该知识点对应的分析内容。</p></div>}
           </div>}
         </div>
         <div className="source-strip"><LinkIcon size={15} /><span>已上传材料</span>{previewMaterials.length ? previewMaterials.map((material) => <button className={material.id === activeMaterial?.id ? 'active' : ''} key={material.id} onClick={() => setActiveMaterialId(material.id)}>{material.name}</button>) : <button onClick={() => notify('请先返回材料库上传并完成分析')}>暂无可预览材料</button>}</div>
