@@ -141,11 +141,7 @@ function App() {
           <Route path="/courses/:courseId" element={<CourseSections courses={courses} setCourses={setCourses} notify={notify} />} />
           <Route path="/courses/:courseId/sections/:sectionId" element={<SectionDetail courses={courses} setCourses={setCourses} notify={notify} />} />
           <Route path="/courses/:courseId/sections/:sectionId/replay" element={<Replay courses={courses} setCourses={setCourses} notify={notify} />} />
-          <Route path="/courses/:courseId/sections/:sectionId/review" element={<Review courses={courses} notify={notify} />} />
-          <Route path="/courses/:courseId/sections/:sectionId/progress" element={<Progress courses={courses} />} />
           <Route path="/courses/:courseId/replay" element={<LegacySectionRedirect courses={courses} suffix="replay" />} />
-          <Route path="/courses/:courseId/review" element={<LegacySectionRedirect courses={courses} suffix="review" />} />
-          <Route path="/courses/:courseId/progress" element={<LegacySectionRedirect courses={courses} suffix="progress" />} />
           <Route path="/settings" element={<SettingsPage notify={notify} />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
@@ -173,8 +169,6 @@ function Sidebar() {
       <nav className="nav-main">
         <NavItem to="/" end icon={<LayoutDashboard size={18} />} label="课程空间" />
         <NavItem to={sectionId ? `${base}/replay` : `/courses/${courseId}`} icon={<BrainCircuit size={18} />} label="课堂重放" />
-        <NavItem to={sectionId ? `${base}/review` : `/courses/${courseId}`} icon={<ListChecks size={18} />} label="复习工坊" />
-        <NavItem to={sectionId ? `${base}/progress` : `/courses/${courseId}`} icon={<BarChart3 size={18} />} label="我的学习" />
       </nav>
       <div className="sidebar-label">当前学期</div>
       <div className="semester-card">
@@ -250,7 +244,7 @@ function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCour
       <section className="section-block">
         <div className="section-heading"><div><h2>我的课程</h2><p>每门课都有独立的知识路径与学习记录</p></div><button className="text-button">查看全部 <ArrowRight size={15} /></button></div>
         <div className="course-grid">
-          {courses.map((course) => <CourseCard key={course.id} course={course} />)}
+          {courses.map((course) => <CourseCard key={course.id} course={course} onDelete={() => { if (window.confirm(`确定删除课程「${course.title}」？该课程下的所有小节与学习记录都会被移除。`)) { setCourses(courses.filter((item) => item.id !== course.id)); notify('课程已删除') } }} />)}
           <button className="new-course-card" onClick={() => setShowCreate(true)}><span><Plus size={22} /></span><strong>创建新课程</strong><small>导入课件，开始构建知识路径</small></button>
         </div>
       </section>
@@ -278,12 +272,13 @@ function Metric({ icon, label, value, delta, positive }: { icon: ReactNode; labe
   return <div className="metric"><div className="metric-icon">{icon}</div><div><span>{label}</span><strong>{value}</strong><small className={positive ? 'positive' : ''}>{delta}</small></div></div>
 }
 
-function CourseCard({ course }: { course: Course }) {
+function CourseCard({ course, onDelete }: { course: Course; onDelete: () => void }) {
   const displayedMastery = courseMastery(course)
   const stats = courseStats(course)
+  const [menuOpen, setMenuOpen] = useState(false)
   return (
     <Link to={`/courses/${course.id}`} className="course-card">
-      <div className="course-card-top"><span className="course-swatch" style={{ background: course.accent }} /><button className="icon-button tiny" onClick={(event) => event.preventDefault()}><MoreHorizontal size={16} /></button></div>
+      <div className="course-card-top"><span className="course-swatch" style={{ background: course.accent }} /><div className="material-menu-wrap"><button className="icon-button tiny" aria-label="课程操作" aria-expanded={menuOpen} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setMenuOpen((value) => !value) }}><MoreHorizontal size={16} /></button>{menuOpen && <div className="material-menu" onMouseLeave={() => setMenuOpen(false)}><button className="delete" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setMenuOpen(false); onDelete() }}><Trash2 size={14} />删除课程</button></div>}</div></div>
       <div className="course-code">{course.code}</div><h3>{course.title}</h3><p>{courseSubtitle(course)}</p>
       <div className="tag-row">{course.tags.map((tag, index) => <span key={`${tag}-${index}`} title={tag}>{formatConceptLabel(tag)}</span>)}</div>
       <div className="card-divider" />
@@ -322,7 +317,7 @@ function useSection(courses: Course[]) {
 
 function SectionSubnav({ courseId, sectionId }: { courseId: string; sectionId: string }) {
   const base = `/courses/${courseId}/sections/${sectionId}`
-  return <div className="course-subnav"><NavLink end to={base}>材料与构建</NavLink><NavLink to={`${base}/replay`}>课堂重放</NavLink><NavLink to={`${base}/review`}>复习工坊</NavLink><NavLink to={`${base}/progress`}>学习记录</NavLink></div>
+  return <div className="course-subnav"><NavLink end to={base}>材料与构建</NavLink><NavLink to={`${base}/replay`}>课堂重放</NavLink></div>
 }
 
 function LegacySectionRedirect({ courses, suffix }: { courses: Course[]; suffix: string }) {
