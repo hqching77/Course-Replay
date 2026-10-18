@@ -201,8 +201,11 @@ function PageHeader({ title, subtitle, actions }: { title: string; subtitle: str
   )
 }
 
+const COURSE_GRID_CAP = 6
+
 function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCourses: (courses: Course[]) => void; notify: (message: string) => void }) {
   const [showCreate, setShowCreate] = useState(false)
+  const [showAllCourses, setShowAllCourses] = useState(false)
   const navigate = useNavigate()
   const avg = Math.round(courses.reduce((sum, item) => sum + courseMastery(item), 0) / Math.max(courses.length, 1))
   const lead = courses[0]
@@ -242,25 +245,12 @@ function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCour
       </section>
 
       <section className="section-block">
-        <div className="section-heading"><div><h2>我的课程</h2><p>每门课都有独立的知识路径与学习记录</p></div><button className="text-button">查看全部 <ArrowRight size={15} /></button></div>
+        <div className="section-heading"><div><h2>我的课程</h2><p>每门课都有独立的知识路径与学习记录</p></div>{courses.length > COURSE_GRID_CAP && <button className="text-button" onClick={() => setShowAllCourses((value) => !value)}>{showAllCourses ? '收起' : `查看全部 (${courses.length})`} <ArrowRight size={15} /></button>}</div>
         <div className="course-grid">
-          {courses.map((course) => <CourseCard key={course.id} course={course} onDelete={() => { if (window.confirm(`确定删除课程「${course.title}」？该课程下的所有小节与学习记录都会被移除。`)) { setCourses(courses.filter((item) => item.id !== course.id)); notify('课程已删除') } }} />)}
+          {(showAllCourses ? courses : courses.slice(0, COURSE_GRID_CAP)).map((course) => <CourseCard key={course.id} course={course}
+            onDelete={() => { if (window.confirm(`确定删除课程「${course.title}」？该课程下的所有小节与学习记录都会被移除。`)) { setCourses(courses.filter((item) => item.id !== course.id)); notify('课程已删除') } }}
+            onRename={() => { const name = window.prompt('重命名课程', course.title); if (name && name.trim() && name.trim() !== course.title) { setCourses(courses.map((item) => item.id === course.id ? { ...item, title: name.trim() } : item)); notify('课程已重命名') } }} />)}
           <button className="new-course-card" onClick={() => setShowCreate(true)}><span><Plus size={22} /></span><strong>创建新课程</strong><small>导入课件，开始构建知识路径</small></button>
-        </div>
-      </section>
-
-      <section className="lower-grid">
-        <div className="panel activity-panel">
-          <div className="section-heading compact"><div><h2>最近活动</h2></div><button className="icon-button small"><MoreHorizontal size={17} /></button></div>
-          <Activity icon={<Check size={15} />} color="green" title="完成「布尔代数」知识检验" meta="数字电路基础 · 今天 14:28" badge="掌握度 +15%" />
-          <Activity icon={<MessageSquareText size={15} />} color="blue" title="探索：为什么德摩根定律可以推广？" meta="数字电路基础 · 今天 14:12" />
-          <Activity icon={<FileText size={15} />} color="orange" title="生成期中复习题单" meta="信号与系统 · 昨天 21:08" badge="12 道题" />
-        </div>
-        <div className="panel focus-panel">
-          <span className="pill amber"><Sparkles size={13} />AI 学习建议</span>
-          <h3>先补上“卡诺图相邻项”</h3>
-          <p>最近两次回答都在边界环绕规则上出错。花 6 分钟补齐这个前置知识，再继续组合逻辑设计。</p>
-          <Link to={leadReplay} className="text-link">进入针对性复习 <ArrowRight size={15} /></Link>
         </div>
       </section>
       {showCreate && <CreateCourseModal onClose={() => setShowCreate(false)} onCreate={(course) => { setCourses([...courses, course]); setShowCreate(false); notify('课程已创建，去里面新建小节吧'); navigate(`/courses/${course.id}`) }} />}
@@ -272,13 +262,13 @@ function Metric({ icon, label, value, delta, positive }: { icon: ReactNode; labe
   return <div className="metric"><div className="metric-icon">{icon}</div><div><span>{label}</span><strong>{value}</strong><small className={positive ? 'positive' : ''}>{delta}</small></div></div>
 }
 
-function CourseCard({ course, onDelete }: { course: Course; onDelete: () => void }) {
+function CourseCard({ course, onDelete, onRename }: { course: Course; onDelete: () => void; onRename: () => void }) {
   const displayedMastery = courseMastery(course)
   const stats = courseStats(course)
   const [menuOpen, setMenuOpen] = useState(false)
   return (
     <Link to={`/courses/${course.id}`} className="course-card">
-      <div className="course-card-top"><span className="course-swatch" style={{ background: course.accent }} /><div className="material-menu-wrap"><button className="icon-button tiny" aria-label="课程操作" aria-expanded={menuOpen} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setMenuOpen((value) => !value) }}><MoreHorizontal size={16} /></button>{menuOpen && <div className="material-menu" onMouseLeave={() => setMenuOpen(false)}><button className="delete" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setMenuOpen(false); onDelete() }}><Trash2 size={14} />删除课程</button></div>}</div></div>
+      <div className="course-card-top"><span className="course-swatch" style={{ background: course.accent }} /><div className="material-menu-wrap"><button className="icon-button tiny" aria-label="课程操作" aria-expanded={menuOpen} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setMenuOpen((value) => !value) }}><MoreHorizontal size={16} /></button>{menuOpen && <div className="material-menu" onMouseLeave={() => setMenuOpen(false)}><button onClick={(event) => { event.preventDefault(); event.stopPropagation(); setMenuOpen(false); onRename() }}><FileText size={14} />重命名</button><button className="delete" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setMenuOpen(false); onDelete() }}><Trash2 size={14} />删除课程</button></div>}</div></div>
       <div className="course-code">{course.code}</div><h3>{course.title}</h3><p>{courseSubtitle(course)}</p>
       <div className="tag-row">{course.tags.map((tag, index) => <span key={`${tag}-${index}`} title={tag}>{formatConceptLabel(tag)}</span>)}</div>
       <div className="card-divider" />
@@ -345,6 +335,12 @@ function CourseSections({ courses, setCourses, notify }: { courses: Course[]; se
     setCourses((current) => current.map((item) => item.id === course.id ? { ...item, sections: item.sections.filter((section) => section.id !== sectionId) } : item))
     notify('小节已删除')
   }
+  const renameSection = (sectionId: string, currentTitle: string) => {
+    const name = window.prompt('重命名小节', currentTitle)
+    if (!name || !name.trim() || name.trim() === currentTitle) return
+    setCourses((current) => current.map((item) => item.id === course.id ? { ...item, sections: item.sections.map((section) => section.id === sectionId ? { ...section, title: name.trim() } : section) } : item))
+    notify('小节已重命名')
+  }
   return <div className="page">
     <div className="back-row"><Link to="/"><ArrowLeft size={16} />全部课程</Link><span>/</span><span>{course.title}</span></div>
     <PageHeader title={course.title} subtitle={courseSubtitle(course)} actions={<button className="button primary" onClick={() => setShowCreate(true)}><Plus size={17} />新建小节</button>} />
@@ -357,7 +353,7 @@ function CourseSections({ courses, setCourses, notify }: { courses: Course[]; se
     <section className="section-block">
       <div className="section-heading"><div><h2>课程小节</h2><p>每个小节独立上传文件、独立构建与学习，内容互不混用</p></div></div>
       <div className="course-grid section-grid">
-        {course.sections.map((section) => <SectionCard key={section.id} courseId={course.id} section={section} onDelete={() => deleteSection(section.id)} />)}
+        {course.sections.map((section) => <SectionCard key={section.id} courseId={course.id} section={section} onDelete={() => deleteSection(section.id)} onRename={() => renameSection(section.id, section.title)} />)}
         <button className="new-course-card" onClick={() => setShowCreate(true)}><span><Plus size={22} /></span><strong>新建小节</strong><small>上传本节课件，开始构建</small></button>
       </div>
     </section>
@@ -365,12 +361,13 @@ function CourseSections({ courses, setCourses, notify }: { courses: Course[]; se
   </div>
 }
 
-function SectionCard({ courseId, section, onDelete }: { courseId: string; section: Section; onDelete: () => void }) {
+function SectionCard({ courseId, section, onDelete, onRename }: { courseId: string; section: Section; onDelete: () => void; onRename: () => void }) {
   const ready = section.status === 'ready'
   const stageCount = section.knowledgeMap?.length || section.analysis?.learning_path.length || 0
   const statusLabel = section.status === 'ready' ? '已构建' : section.status === 'building' ? '构建中' : section.status === 'failed' ? '构建失败' : '待构建'
+  const [menuOpen, setMenuOpen] = useState(false)
   return <Link to={`/courses/${courseId}/sections/${section.id}`} className="course-card section-card">
-    <div className="course-card-top"><span className={`section-status ${section.status}`}>{statusLabel}</span><button className="icon-button tiny" aria-label="删除小节" onClick={(event) => { event.preventDefault(); onDelete() }}><Trash2 size={15} /></button></div>
+    <div className="course-card-top"><span className={`section-status ${section.status}`}>{statusLabel}</span><div className="material-menu-wrap"><button className="icon-button tiny" aria-label="小节操作" aria-expanded={menuOpen} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setMenuOpen((value) => !value) }}><MoreHorizontal size={16} /></button>{menuOpen && <div className="material-menu" onMouseLeave={() => setMenuOpen(false)}><button onClick={(event) => { event.preventDefault(); event.stopPropagation(); setMenuOpen(false); onRename() }}><FileText size={14} />重命名</button><button className="delete" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setMenuOpen(false); onDelete() }}><Trash2 size={14} />删除小节</button></div>}</div></div>
     <h3>{section.title}</h3>
     <p>{section.analysis ? trimText(section.analysis.summary, 92) : '上传文件并点击“开始构建”，生成本节的分层讲稿与题目。'}</p>
     <div className="card-divider" />
