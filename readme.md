@@ -8,7 +8,7 @@
 > # 终端 1：启动后端
 > cd backend
 > uv sync --extra test
-> uv run uvicorn app.main:app --reload --port 8000
+> uv run uvicorn app.main:app --reload --port 8001
 >
 > # 终端 2：启动前端
 > npm run dev

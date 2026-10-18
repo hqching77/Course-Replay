@@ -39,7 +39,19 @@ import {
   Zap,
 } from 'lucide-react'
 import { Link, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Course, CourseAnalysis, knowledgeNodes, loadCourses, loadMastery, saveCourses, saveMastery } from './data'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
+import { Course, CourseAnalysis, KnowledgeNode, KnowledgeTier, TIER_META, deriveKnowledgeMap, knowledgeNodes, loadCourses, loadMastery, saveCourses, saveMastery } from './data'
+
+const MARKDOWN_PLUGINS = { remarkPlugins: [remarkGfm, remarkMath], rehypePlugins: [rehypeKatex] }
+const TIER_ORDER: KnowledgeTier[] = ['prereq', 'core', 'advanced']
+
+function Markdown({ children }: { children: string }) {
+  return <div className="markdown-body"><ReactMarkdown remarkPlugins={MARKDOWN_PLUGINS.remarkPlugins} rehypePlugins={MARKDOWN_PLUGINS.rehypePlugins}>{children}</ReactMarkdown></div>
+}
 
 type Notice = { id: number; message: string }
 
@@ -170,11 +182,11 @@ function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCour
       <section className="hero-card">
         <div className="hero-copy">
           <span className="pill lime"><Zap size={13} />继续上次学习</span>
-          <h2>逻辑函数化简</h2>
-          <p>数字电路基础 · 第 3 讲</p>
+          <h2>Shell、终端与命令执行</h2>
+          <p>计算机程序设计基础（1）· 补充材料 1</p>
           <div className="hero-progress-row"><span>课程进度</span><strong>3 / 5</strong></div>
           <div className="hero-progress"><span style={{ width: '58%' }} /></div>
-          <Link className="button light" to="/courses/digital-circuits/replay">继续课堂重放 <ArrowRight size={17} /></Link>
+          <Link className="button light" to="/courses/programming-linux/replay">继续课堂重放 <ArrowRight size={17} /></Link>
         </div>
         <div className="hero-visual" aria-hidden="true">
           <div className="orbit orbit-one" /><div className="orbit orbit-two" />
@@ -225,7 +237,7 @@ function Metric({ icon, label, value, delta, positive }: { icon: ReactNode; labe
 }
 
 function CourseCard({ course }: { course: Course }) {
-  const displayedMastery = course.id === 'digital-circuits' ? loadMastery() : course.mastery
+  const displayedMastery = course.id === 'programming-linux' ? loadMastery() : course.mastery
   return (
     <Link to={`/courses/${course.id}`} className="course-card">
       <div className="course-card-top"><span className="course-swatch" style={{ background: course.accent }} /><button className="icon-button tiny" onClick={(event) => event.preventDefault()}><MoreHorizontal size={16} /></button></div>
@@ -356,6 +368,7 @@ function CourseDetail({ courses, setCourses, notify }: { courses: Course[]; setC
               ...item,
               processingJob: undefined,
               analysis: payload.analysis,
+              knowledgeMap: deriveKnowledgeMap(payload.analysis),
               analysisJobId: jobId,
               tags: payload.analysis.key_concepts.slice(0, 3).map(formatConceptLabel),
               materials: item.materials.map((material) => {
@@ -533,46 +546,185 @@ function CourseDetail({ courses, setCourses, notify }: { courses: Course[]; setC
 
 function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses: Dispatch<SetStateAction<Course[]>>; notify: (message: string) => void }) {
   const course = useCourse(courses)
-  const [selected, setSelected] = useState('simplify')
+  const replayPageRef = useRef<HTMLDivElement>(null)
+  const chatScrollRef = useRef<HTMLDivElement>(null)
+  const askInputRef = useRef<HTMLTextAreaElement>(null)
+  const [selected, setSelected] = useState('')
   const [activeMaterialId, setActiveMaterialId] = useState('')
   const [answer, setAnswer] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState(false)
   const [mastery, setMastery] = useState(loadMastery)
   const [chat, setChat] = useState('')
+  const [chatQuote, setChatQuote] = useState<string | null>(null)
   const [asking, setAsking] = useState(false)
-  const replayNodes = useMemo(() => course?.analysis?.learning_path.length ? course.analysis.learning_path.map((rawStep, index) => ({
-    id: `analysis-${index}`,
-    title: formatLearningStep(rawStep).title,
-    eyebrow: index === 0 ? '当前材料' : 'AI 学习路径',
-    mastery: index === 0 ? mastery : 0,
-    duration: '按材料学习',
-    done: index === 0 && mastery >= 75,
-  })) : knowledgeNodes, [course?.analysis, mastery])
+  const [selectionAsk, setSelectionAsk] = useState<{ text: string; left: number; top: number } | null>(null)
+  const kmNodes = useMemo<KnowledgeNode[]>(() => {
+    if (course?.knowledgeMap?.length) return course.knowledgeMap
+    if (course?.analysis?.learning_path.length) return deriveKnowledgeMap(course.analysis)
+    return knowledgeNodes.map((node) => ({ id: node.id, title: node.title, tier: 'core' as KnowledgeTier, summary: node.eyebrow, content: `## ${node.title}\n\n上传并分析课程材料后，这里会生成结构化的学习内容。` }))
+  }, [course?.analysis, course?.knowledgeMap])
+  const orderedNodes = useMemo(() => TIER_ORDER.flatMap((tier) => kmNodes.filter((node) => node.tier === tier)), [kmNodes])
+  const groupedNodes = useMemo(() => TIER_ORDER.map((tier) => ({ tier, nodes: kmNodes.filter((node) => node.tier === tier) })).filter((group) => group.nodes.length), [kmNodes])
   const explorationNodes = course?.explorationNodes || []
   const chatHistory = course?.chatHistory || []
-  const topology = useMemo(() => {
-    const root = { id: 'course-root', title: course?.analysis?.title || course?.title || '课程', kind: 'root', x: 72, y: 18, parentId: undefined as string | undefined }
-    const main = replayNodes.map((node, index) => ({ ...node, kind: 'main', x: 72, y: 105 + index * 128, parentId: index === 0 ? root.id : replayNodes[index - 1].id }))
-    const branches = explorationNodes.map((node, index) => {
-      const parent = [...main, root].find((candidate) => candidate.id === node.parentId) || main[0] || root
-      const siblingsBefore = explorationNodes.slice(0, index).filter((item) => item.parentId === node.parentId).length
-      return { ...node, kind: 'branch', x: siblingsBefore % 2 === 0 ? 4 : 158, y: parent.y + 60 + Math.floor(siblingsBefore / 2) * 54 }
-    })
-    const nodes = [root, ...main, ...branches]
-    return { nodes, height: Math.max(530, ...nodes.map((node) => node.y + 105)) }
-  }, [course?.analysis?.title, course?.title, explorationNodes, replayNodes])
+  const studyDialogs = course?.studyDialogs || []
+  const activeDialogId = course?.activeDialogId || 'main'
+  const activeDialog = studyDialogs.find((dialog) => dialog.id === activeDialogId)
+  const dialogMessages = chatHistory.filter((message) => (message.dialogId || 'main') === activeDialogId)
+  const latestDialogMessageId = dialogMessages[dialogMessages.length - 1]?.id
+  const isMainDialog = activeDialogId === 'main'
   const previewMaterials = useMemo(() => course?.materials.filter((material) => material.previewUrl) || [], [course?.materials])
   const activeMaterial = previewMaterials.find((material) => material.id === activeMaterialId) || previewMaterials[0]
+  const activeIndex = orderedNodes.findIndex((node) => node.id === selected)
+  const activeKnowledge = kmNodes.find((node) => node.id === selected)
+  const activeExploration = explorationNodes.find((node) => node.id === selected)
+  const explorationAnswer = activeExploration ? [...chatHistory].reverse().find((message) => message.role === 'assistant' && message.nodeId === activeExploration.id)?.content || '' : ''
+  const activeContent = activeKnowledge ? activeKnowledge.content
+    : activeExploration ? `## ${activeExploration.title}\n\n> ❓ ${activeExploration.question}\n\n${explorationAnswer || '_正在生成回答…_'}`
+    : orderedNodes[0]?.content || '## 等待材料分析\n\n上传课件后将在这里生成结构化的学习内容。'
+  const currentTitle = activeKnowledge?.title || activeExploration?.title || orderedNodes[Math.max(activeIndex, 0)]?.title || course?.analysis?.title || course?.title || '课程'
+  const activeTier = activeKnowledge?.tier
+  const tierLabel = activeKnowledge ? TIER_META[activeKnowledge.tier].label : activeExploration ? '探索支线' : '知识节点'
+  const tierEyebrow = activeKnowledge ? TIER_META[activeKnowledge.tier].eyebrow : 'EXPLORATION'
+  const progressPct = orderedNodes.length ? Math.max(8, ((Math.max(activeIndex, 0) + 1) / orderedNodes.length) * 100) : 8
+  const sourceLesson = useMemo(() => {
+    if (!course) return null
+    let nodeIndex = orderedNodes.findIndex((node) => node.id === selected)
+    if (nodeIndex < 0 && activeExploration) {
+      let parentId = activeExploration.parentId
+      for (let depth = 0; depth < 8 && nodeIndex < 0; depth += 1) {
+        nodeIndex = orderedNodes.findIndex((node) => node.id === parentId)
+        const parentBranch = explorationNodes.find((node) => node.id === parentId)
+        if (!parentBranch) break
+        parentId = parentBranch.parentId
+      }
+    }
+    const safeIndex = Math.max(0, nodeIndex)
+    const section = course.analysis?.sections?.[safeIndex]
+    const totalPages = previewMaterials.reduce((total, material) => total + Math.max(1, material.pages || 1), 0)
+    const distributedPage = totalPages > 0
+      ? Math.floor((safeIndex / Math.max(1, orderedNodes.length)) * totalPages) + 1
+      : 1
+    let remainingPage = distributedPage
+    let fallbackMaterial = previewMaterials[0]
+    for (const material of previewMaterials) {
+      const pages = Math.max(1, material.pages || 1)
+      if (remainingPage <= pages) { fallbackMaterial = material; break }
+      remainingPage -= pages
+    }
+    const exactMaterial = section?.source_filename
+      ? previewMaterials.find((material) => material.name === section.source_filename)
+        || previewMaterials.find((material) => material.name.includes(section.source_filename) || section.source_filename.includes(material.name))
+      : undefined
+    const sourceMaterial = exactMaterial || fallbackMaterial
+    const sourcePage = Math.min(
+      Math.max(1, exactMaterial ? section?.source_page || 1 : remainingPage),
+      Math.max(1, sourceMaterial?.pages || 1),
+    )
+    return {
+      materialId: sourceMaterial?.id,
+      page: sourcePage,
+      isExactSource: Boolean(exactMaterial && section),
+    }
+  }, [activeExploration, course, explorationNodes, orderedNodes, previewMaterials, selected])
+  const activeSourcePage = activeMaterial?.id === sourceLesson?.materialId ? sourceLesson.page : 1
+  const activeSourceUrl = activeMaterial?.previewUrl
+    ? `${activeMaterial.previewUrl.split('#')[0]}#page=${activeSourcePage}&view=FitH`
+    : undefined
 
   useEffect(() => {
-    if (replayNodes.length > 0 && !replayNodes.some((node) => node.id === selected)) setSelected(replayNodes[0].id)
-  }, [replayNodes, selected])
+    const isKnownNode = orderedNodes.some((node) => node.id === selected)
+      || explorationNodes.some((node) => node.id === selected)
+    if (orderedNodes.length > 0 && !isKnownNode) setSelected(orderedNodes[0].id)
+  }, [explorationNodes, orderedNodes, selected])
 
   useEffect(() => {
     if (previewMaterials.length > 0 && !previewMaterials.some((material) => material.id === activeMaterialId)) setActiveMaterialId(previewMaterials[0].id)
   }, [previewMaterials, activeMaterialId])
 
+  useEffect(() => {
+    if (sourceLesson?.materialId) setActiveMaterialId(sourceLesson.materialId)
+  }, [sourceLesson?.materialId, selected])
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const scroller = chatScrollRef.current
+      if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [activeDialogId, asking, latestDialogMessageId, submitted, explorationNodes.length])
+
+  useEffect(() => {
+    const dismissSelectionAsk = () => setSelectionAsk(null)
+    window.addEventListener('resize', dismissSelectionAsk)
+    window.addEventListener('scroll', dismissSelectionAsk, true)
+    return () => {
+      window.removeEventListener('resize', dismissSelectionAsk)
+      window.removeEventListener('scroll', dismissSelectionAsk, true)
+    }
+  }, [])
+
   if (!course) return <NotFound />
+
+  const createDialog = () => {
+    const dialogId = `dialog-${Date.now()}`
+    const dialogNumber = studyDialogs.length + 1
+    setCourses((current) => current.map((item) => item.id === course.id ? {
+      ...item,
+      studyDialogs: [...(item.studyDialogs || []), { id: dialogId, title: `新对话 ${dialogNumber}`, createdAt: Date.now() }],
+      activeDialogId: dialogId,
+    } : item))
+    setChat('')
+    setChatQuote(null)
+    notify('已开启独立对话')
+  }
+
+  const switchDialog = (dialogId: string) => {
+    setCourses((current) => current.map((item) => item.id === course.id ? { ...item, activeDialogId: dialogId } : item))
+    setChat('')
+    setChatQuote(null)
+  }
+
+  const captureTextSelection = () => {
+    requestAnimationFrame(() => {
+      const selection = window.getSelection()
+      const text = selection?.toString().replace(/\s+/g, ' ').trim() || ''
+      if (!selection || selection.rangeCount === 0 || text.length < 2) {
+        setSelectionAsk(null)
+        return
+      }
+      const range = selection.getRangeAt(0)
+      const ancestor = range.commonAncestorContainer instanceof Element
+        ? range.commonAncestorContainer
+        : range.commonAncestorContainer.parentElement
+      if (!ancestor || !replayPageRef.current?.contains(ancestor) || ancestor.closest('textarea, input, select, button')) {
+        setSelectionAsk(null)
+        return
+      }
+      const rect = range.getBoundingClientRect()
+      if (!rect.width && !rect.height) return
+      setSelectionAsk({
+        text: text.slice(0, 1600),
+        left: Math.min(window.innerWidth - 72, Math.max(72, rect.left + rect.width / 2)),
+        top: Math.max(12, rect.top - 44),
+      })
+    })
+  }
+
+  const quoteSelectionInChat = () => {
+    if (!selectionAsk) return
+    setChatQuote(selectionAsk.text)
+    setSelectionAsk(null)
+    window.getSelection()?.removeAllRanges()
+    requestAnimationFrame(() => {
+      const input = askInputRef.current
+      input?.focus()
+      if (input) {
+        const end = input.value.length
+        input.setSelectionRange(end, end)
+      }
+    })
+  }
 
   const submitAnswer = () => {
     if (!answer) return
@@ -584,16 +736,24 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
     } else if (answer === 'B' && mastery < 77) { setMastery(77); saveMastery(77) }
   }
   const ask = async () => {
-    const question = chat.trim()
-    if (!question || asking) return
+    const prompt = chat.trim()
+    const selectedQuote = chatQuote?.trim() || ''
+    if ((!prompt && !selectedQuote) || asking) return
+    const visibleQuestion = prompt || '请解释这段选中内容'
+    const question = selectedQuote
+      ? `请结合以下选中内容回答。\n\n选中内容：\n${selectedQuote}\n\n用户问题：\n${visibleQuestion}`
+      : visibleQuestion
     const userMessageId = `message-${Date.now()}-user`
     const courseId = course.id
-    const parentId = topology.nodes.some((node) => node.id === selected) ? selected : replayNodes[0]?.id || 'course-root'
+    const requestDialogId = activeDialogId
+    const parentId = activeKnowledge ? selected : (activeExploration?.parentId || orderedNodes[0]?.id || 'course-root')
     setChat('')
+    setChatQuote(null)
     setAsking(true)
     setCourses((current) => current.map((item) => item.id === courseId ? {
       ...item,
-      chatHistory: [...(item.chatHistory || []), { id: userMessageId, role: 'user' as const, content: question }],
+      studyDialogs: (item.studyDialogs || []).map((dialog) => dialog.id === requestDialogId && dialog.title.startsWith('新对话 ') ? { ...dialog, title: trimText(visibleQuestion, 14) } : dialog),
+      chatHistory: [...(item.chatHistory || []), { id: userMessageId, role: 'user' as const, content: visibleQuestion, quote: selectedQuote || undefined, dialogId: requestDialogId }],
     } : item))
     try {
       const response = await fetch('/api/study/ask', {
@@ -602,21 +762,37 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
         body: JSON.stringify({
           question,
           course_title: course.title,
-          current_topic: topology.nodes.find((node) => node.id === parentId)?.title || currentTitle,
+          current_topic: currentTitle,
           summary: course.analysis?.summary || course.description,
-          learning_path: course.analysis?.learning_path || replayNodes.map((node) => node.title),
+          learning_path: course.analysis?.learning_path || kmNodes.map((node) => node.title),
           key_concepts: course.analysis?.key_concepts || course.tags,
-          existing_nodes: topology.nodes.map((node) => node.title),
+          existing_nodes: [...kmNodes.map((node) => node.title), ...explorationNodes.map((node) => node.title)],
+          current_dialog_title: activeDialog?.title || '当前节点',
+          allow_new_dialog: requestDialogId === 'main',
         }),
       })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.detail || `AI 回答失败（HTTP ${response.status}）`)
-      const nodeId = payload.add_node && payload.node_title ? `branch-${Date.now()}` : undefined
-      setCourses((current) => current.map((item) => item.id === courseId ? {
-        ...item,
-        explorationNodes: nodeId ? [...(item.explorationNodes || []), { id: nodeId, title: formatConceptLabel(payload.node_title), parentId, question }] : item.explorationNodes,
-        chatHistory: [...(item.chatHistory || []), { id: `message-${Date.now()}-assistant`, role: 'assistant' as const, content: payload.answer || '我暂时无法回答这个问题。', nodeId }],
-      } : item))
+      const shouldCreateDialog = Boolean(payload.new_dialog) && requestDialogId === 'main'
+      const responseDialogId = shouldCreateDialog ? `dialog-${Date.now()}` : requestDialogId
+      const dialogTitle = trimText(payload.dialog_title || visibleQuestion, 14)
+      const nodeId = !shouldCreateDialog && payload.add_node && payload.node_title ? `branch-${Date.now()}` : undefined
+      setCourses((current) => current.map((item) => {
+        if (item.id !== courseId) return item
+        const movedHistory = shouldCreateDialog
+          ? (item.chatHistory || []).map((message) => message.id === userMessageId ? { ...message, dialogId: responseDialogId } : message)
+          : (item.chatHistory || [])
+        return {
+          ...item,
+          activeDialogId: shouldCreateDialog ? responseDialogId : item.activeDialogId,
+          studyDialogs: shouldCreateDialog
+            ? [...(item.studyDialogs || []), { id: responseDialogId, title: dialogTitle, createdAt: Date.now() }]
+            : item.studyDialogs,
+          explorationNodes: nodeId ? [...(item.explorationNodes || []), { id: nodeId, title: formatConceptLabel(payload.node_title), parentId, question: visibleQuestion }] : item.explorationNodes,
+          chatHistory: [...movedHistory, { id: `message-${Date.now()}-assistant`, role: 'assistant' as const, content: payload.answer || '我暂时无法回答这个问题。', nodeId, dialogId: responseDialogId }],
+        }
+      }))
+      if (shouldCreateDialog) notify(`已将新话题移到独立对话「${dialogTitle}」`)
       if (nodeId) {
         setSelected(nodeId)
         notify(`拓扑图已新增：${formatConceptLabel(payload.node_title)}`)
@@ -625,69 +801,71 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
       const message = error instanceof Error ? error.message : 'AI 回答失败'
       setCourses((current) => current.map((item) => item.id === courseId ? {
         ...item,
-        chatHistory: [...(item.chatHistory || []), { id: `message-${Date.now()}-assistant`, role: 'assistant' as const, content: message }],
+        chatHistory: [...(item.chatHistory || []), { id: `message-${Date.now()}-assistant`, role: 'assistant' as const, content: message, dialogId: requestDialogId }],
       } : item))
     } finally {
       setAsking(false)
     }
   }
-  const activeIndex = replayNodes.findIndex((node) => node.id === selected)
-  const currentTitle = topology.nodes.find((node) => node.id === selected)?.title || replayNodes[Math.max(activeIndex, 0)]?.title || course.analysis?.title || course.title
   const generatedQuestion = course.analysis?.review_questions[0]
-  return <div className="replay-page">
+  return <div className="replay-page" ref={replayPageRef} onMouseUp={captureTextSelection} onTouchEnd={captureTextSelection}>
+    {selectionAsk && <button className="selection-ask" style={{ left: selectionAsk.left, top: selectionAsk.top }} onMouseDown={(event) => event.preventDefault()} onClick={quoteSelectionInChat}><MessageSquareText size={14} />问 AI</button>}
     <div className="replay-topbar"><Link to={`/courses/${course.id}`}><ArrowLeft size={16} />{course.title}</Link><div className="replay-location"><span>课堂重放</span><ChevronRight size={14} /><strong>{currentTitle}</strong></div><div className="replay-actions"><span className="saved"><Check size={14} />分析与进度已保存</span><button className="icon-button"><PanelLeftClose size={18} /></button></div></div>
     <div className="replay-grid">
       <aside className="path-column">
-        <div className="path-head"><span className="eyebrow">LIVE KNOWLEDGE MAP</span><h2>课程知识拓扑</h2><div><span>{replayNodes.length} 个主线节点</span><span>{explorationNodes.length} 条探索支线</span></div><div className="thin-progress"><span style={{ width: `${Math.max(8, ((Math.max(activeIndex, 0) + 1) / replayNodes.length) * 100)}%` }} /></div></div>
-        <div className="topology-scroll">
-          <div className="topology-canvas" style={{ height: `${topology.height}px` }}>
-            <svg viewBox={`0 0 260 ${topology.height}`} preserveAspectRatio="none" aria-hidden="true">
-              {topology.nodes.filter((node) => node.parentId).map((node) => {
-                const parent = topology.nodes.find((candidate) => candidate.id === node.parentId)
-                if (!parent) return null
-                const isBranch = node.kind === 'branch'
-                return <path key={`${node.parentId}-${node.id}`} className={isBranch ? 'branch-edge' : 'main-edge'} d={`M ${parent.x + 55} ${parent.y + 38} C ${parent.x + 55} ${node.y - 12}, ${node.x + 50} ${parent.y + 48}, ${node.x + 50} ${node.y}`} />
+        <div className="path-head"><span className="eyebrow">LIVE KNOWLEDGE MAP</span><h2>课程知识拓扑</h2><div><span>{kmNodes.length} 个知识节点</span><span>{explorationNodes.length} 条探索支线</span></div><div className="thin-progress"><span style={{ width: `${progressPct}%` }} /></div></div>
+        <div className="tier-scroll">
+          {groupedNodes.map((group) => <section className={`tier-group tier-${group.tier}`} key={group.tier}>
+            <header className="tier-label"><span className="tier-dot" /><div><small>{TIER_META[group.tier].eyebrow}</small><strong>{TIER_META[group.tier].label}</strong></div><span className="tier-count">{group.nodes.length}</span></header>
+            <div className="tier-nodes">
+              {group.nodes.map((node) => {
+                const globalIndex = orderedNodes.findIndex((candidate) => candidate.id === node.id)
+                const children = explorationNodes.filter((child) => child.parentId === node.id)
+                return <div className="tier-node-wrap" key={node.id}>
+                  <button className={`km-node ${selected === node.id ? 'active' : ''} ${activeIndex > -1 && globalIndex < activeIndex ? 'done' : ''}`} onClick={() => setSelected(node.id)}>
+                    <span className="km-step">{String(globalIndex + 1).padStart(2, '0')}</span>
+                    <span className="km-text"><strong>{node.title}</strong><small>{node.summary}</small></span>
+                  </button>
+                  {children.map((child) => <button key={child.id} className={`km-branch ${selected === child.id ? 'active' : ''}`} onClick={() => setSelected(child.id)}><Network size={12} /><span>{child.title}</span></button>)}
+                </div>
               })}
-              {asking && (() => { const parent = topology.nodes.find((node) => node.id === selected) || topology.nodes[0]; return <path className="pending-edge" d={`M ${parent.x + 55} ${parent.y + 38} C ${parent.x + 55} ${parent.y + 58}, 208 ${parent.y + 50}, 208 ${parent.y + 72}`} /> })()}
-            </svg>
-            {topology.nodes.map((node, index) => <button key={node.id} style={{ left: node.x, top: node.y }} onClick={() => setSelected(node.id)} className={`topology-node ${node.kind} ${selected === node.id ? 'active' : ''} ${node.kind === 'main' && 'done' in node && node.done ? 'done' : ''}`}><small>{node.kind === 'root' ? '课程' : node.kind === 'branch' ? '探索支线' : `主线 ${index}`}</small><strong>{node.title}</strong>{node.kind === 'branch' && <Network size={12} />}</button>)}
-            {asking && (() => { const parent = topology.nodes.find((node) => node.id === selected) || topology.nodes[0]; return <div className="topology-node pending" style={{ left: 158, top: parent.y + 72 }}><span className="mini-spinner" /><strong>判断是否扩展…</strong></div> })()}
-          </div>
+            </div>
+          </section>)}
+          {asking && <div className="km-pending"><span className="mini-spinner" />正在判断是否扩展支线…</div>}
         </div>
-        <div className="topology-legend"><span><i className="main" />课程主线</span><span><i className="branch" />问答新增</span></div>
-        <div className="path-tip"><Lightbulb size={16} /><p>点击节点只会切换学习焦点，拓扑图始终保留。必要的新知识会在提问后自动长成支线。</p></div>
+        <div className="topology-legend"><span><i className="t-prereq" />前置</span><span><i className="t-core" />核心</span><span><i className="t-advanced" />进阶</span><span><i className="t-branch" />问答支线</span></div>
+        <div className="path-tip"><Lightbulb size={16} /><p>内容按「前置 → 核心 → 进阶」分层。点击节点切换学习焦点，向 AI 提问会自动长出探索支线。</p></div>
       </aside>
 
       <section className="content-column">
-        <div className="content-toolbar"><div><span className="document-badge">{activeMaterial?.type || 'DOC'}</span><strong>{activeMaterial?.name || '还没有可预览的已分析材料'}</strong></div><span>{activeMaterial?.pages ? `${activeMaterial.pages} 页` : course.analysis ? '已完成分析' : '等待上传'}</span></div>
-        <div className="slide-stage">
-          {activeMaterial?.previewUrl ? (['PNG', 'JPG', 'JPEG', 'WEBP'].includes(activeMaterial.type) ? <img className="material-preview-media" src={activeMaterial.previewUrl} alt={activeMaterial.name} /> : <iframe className="material-preview-frame" src={activeMaterial.previewUrl} title={activeMaterial.name} />) : <div className="slide-paper">
-            <div className="slide-index">03 <span>COMBINATIONAL LOGIC</span></div>
-            <h2>{course.analysis?.title || '卡诺图化简'}</h2><p className="slide-lead">{course.analysis ? trimText(course.analysis.summary, 140) : '利用相邻项合并，消去变化的变量'}</p>
-            <div className="kmap-wrap"><div className="kmap-label top">AB</div><div className="kmap-label side">CD</div><div className="kmap">
-              {[1,1,0,0, 1,1,0,1, 0,0,1,1, 0,0,1,1].map((value, index) => <span key={index} className={value ? 'one' : ''}>{value}</span>)}
-              <i className="k-loop loop-one" /><i className="k-loop loop-two" />
-            </div></div>
-            <div className="formula">F(A,B,C,D) = <b>AB̅ + CD</b></div>
-            <div className="slide-foot"><span>关键规则</span><p>每个圈包含 2ⁿ 个相邻的 1，允许跨越边界，但不允许对角相邻。</p></div>
-          </div>}
+        <div className="content-toolbar"><div><span className={`tier-badge tier-${activeTier || 'branch'}`}>{tierLabel}</span><strong>{currentTitle}</strong></div><span>{activeMaterial?.name || (course.analysis ? '已完成分析' : '等待上传')}</span></div>
+        <div className="reading-stage">
+          <article className="reading-paper">
+            <div className="reading-index"><span>{String(Math.max(activeIndex, 0) + 1).padStart(2, '0')}</span><em>{tierEyebrow} · 学习路径</em></div>
+            <Markdown>{activeContent}</Markdown>
+            {activeMaterial?.previewUrl && <a className="reading-source-link" href={activeSourceUrl} target="_blank" rel="noreferrer"><LinkIcon size={15} /><span><small>对应原始材料</small><strong>{activeMaterial.name} · 第 {activeSourcePage} 页</strong></span><ArrowRight size={16} /></a>}
+            {sourceLesson?.isExactSource && <small className="source-confidence"><Check size={12} />AI 已记录该节点的原始页码</small>}
+          </article>
         </div>
-        <div className="source-strip"><LinkIcon size={15} /><span>已上传材料</span>{previewMaterials.length ? previewMaterials.map((material) => <button className={material.id === activeMaterial?.id ? 'active' : ''} key={material.id} onClick={() => setActiveMaterialId(material.id)}>{material.name}</button>) : <button onClick={() => notify('请先返回材料库上传并完成分析')}>暂无可预览材料</button>}</div>
-        <div className="content-nav"><button className="button ghost" onClick={() => activeIndex > 0 && setSelected(replayNodes[activeIndex - 1].id)} disabled={activeIndex <= 0}><ArrowLeft size={16} />上一步</button><span>步骤 {Math.max(activeIndex + 1, 1)} / {replayNodes.length}</span><button className="button dark" onClick={() => activeIndex < replayNodes.length - 1 && setSelected(replayNodes[activeIndex + 1].id)} disabled={activeIndex >= replayNodes.length - 1}>继续：{replayNodes[activeIndex + 1]?.title || '已到终点'} <ArrowRight size={16} /></button></div>
+        <div className="source-strip"><LinkIcon size={15} /><span>材料依据</span>{previewMaterials.length ? previewMaterials.map((material) => <button className={material.id === activeMaterial?.id ? 'active' : ''} key={material.id} onClick={() => setActiveMaterialId(material.id)}>{material.name}</button>) : course.materials.length ? course.materials.map((material) => <button key={material.id} onClick={() => notify(`材料：${material.name}`)}>{material.name}</button>) : <button onClick={() => notify('请先返回材料库上传并完成分析')}>暂无关联材料</button>}</div>
+        <div className="content-nav"><button className="button ghost" onClick={() => activeIndex > 0 && setSelected(orderedNodes[activeIndex - 1].id)} disabled={activeIndex <= 0}><ArrowLeft size={16} />上一步</button><span>步骤 {Math.max(activeIndex + 1, 1)} / {orderedNodes.length}</span><button className="button dark" onClick={() => activeIndex > -1 && activeIndex < orderedNodes.length - 1 && setSelected(orderedNodes[activeIndex + 1].id)} disabled={activeIndex < 0 || activeIndex >= orderedNodes.length - 1}>继续：{orderedNodes[activeIndex + 1]?.title || '已到终点'} <ArrowRight size={16} /></button></div>
       </section>
 
       <aside className="ai-column">
-        <div className="ai-head"><div><span className="ai-avatar"><Bot size={19} /></span><div><strong>AI 讲师</strong><small><span className="online-dot" />基于 {course.materials.filter((item) => item.status === 'ready').length} 份课程材料</small></div></div><button className="icon-button tiny"><MoreHorizontal size={17} /></button></div>
-        <div className="chat-scroll">
+        <div className="ai-head"><div><span className="ai-avatar"><Bot size={19} /></span><div><strong>AI 讲师</strong><small><span className="online-dot" />{isMainDialog ? `基于 ${course.materials.filter((item) => item.status === 'ready').length} 份课程材料` : '独立话题'}</small></div></div><div className="dialog-controls"><select aria-label="切换对话" value={activeDialogId} disabled={asking} onChange={(event) => switchDialog(event.target.value)}><option value="main">当前节点</option>{studyDialogs.map((dialog) => <option key={dialog.id} value={dialog.id}>{dialog.title}</option>)}</select><button type="button" disabled={asking} onClick={createDialog} title="开启新对话"><Plus size={14} /><span>新对话</span></button></div></div>
+        <div className="chat-scroll" ref={chatScrollRef}>
+          {isMainDialog && <>
           <div className="ai-message"><p>{course.analysis ? trimText(course.analysis.summary, 320) : <>观察这个卡诺图。橙色圈跨过了左右边界——因为卡诺图的列按 <strong>00、01、11、10</strong> 排列，首尾依然只相差一个变量。</>}</p><div className="citation-row">{course.materials.slice(0, 2).map((material, index) => <button key={material.id}>[{index + 1}] {material.name}</button>)}</div></div>
           <div className="ai-message question-card"><span className="question-type">理解检验 · {generatedQuestion ? '基于材料' : '单选题'}</span><p><strong>{generatedQuestion || '为什么卡诺图中最左列与最右列可以视为相邻？'}</strong></p>{generatedQuestion ? <textarea className="review-answer" value={answer || ''} disabled={submitted} onChange={(event) => setAnswer(event.target.value)} placeholder="根据刚才看到的材料写下你的理解…" /> : <div className="answer-list">
             {[['A','它们在图形位置上最近'],['B','格雷码顺序使它们仅有一位变量不同'],['C','所有边界上的格子都彼此相邻'],['D','这是为了让化简结果更短']].map(([key, value]) => <button key={key} disabled={submitted} onClick={() => setAnswer(key)} className={`${answer === key ? 'selected' : ''} ${submitted && key === 'B' ? 'correct' : ''} ${submitted && answer === key && key !== 'B' ? 'wrong' : ''}`}><span>{key}</span>{value}{submitted && key === 'B' && <CheckCircle2 size={16} />}</button>)}
           </div>}<button className="button primary full" disabled={!answer?.trim() || submitted} onClick={submitAnswer}>{submitted ? '回答已保存' : '提交回答'}</button></div>
           {submitted && <div className="feedback-card"><div className="feedback-title"><CheckCircle2 size={18} /><strong>{generatedQuestion ? '回答已记录到当前学习进度' : answer === 'B' ? '回答正确，而且理由匹配' : '再看一下格雷码的排列规则'}</strong><span>{generatedQuestion ? '+5%' : answer === 'B' ? '+15%' : '-8%'}</span></div><p>{generatedQuestion ? '这是根据你上传材料生成的开放题；可以继续向 AI 讲师追问并补充答案。' : answer === 'B' ? '这说明你理解了“逻辑相邻”而不是根据图形位置猜测。' : '边界相邻的关键不是物理距离，而是只有一位变量发生变化。'}</p><div className="mastery-change"><span>本知识点掌握度</span><div><i style={{ width: `${mastery}%` }} /></div><strong>{mastery}%</strong></div><div className="feedback-actions"><button onClick={() => setChat(`为什么“${currentTitle}”是这样？`)}>为什么？深入解释</button><button onClick={() => setChat(`学习“${currentTitle}”前需要补什么基础？`)}>补充前置知识</button></div></div>}
-          {chatHistory.map((message) => message.role === 'user' ? <div className="user-message" key={message.id}>{message.content}</div> : <div className="ai-message compact-message" key={message.id}><p>{message.content}</p>{message.nodeId && <button className="topology-jump" onClick={() => setSelected(message.nodeId!)}><GitBranchIcon />已加入拓扑图 · 点击定位</button>}</div>)}
+          </>}
+          {!isMainDialog && dialogMessages.length === 0 && <div className="dialog-empty"><span><MessageSquareText size={20} /></span><strong>{activeDialog?.title || '新对话'}</strong><p>这是一个独立话题，不会混入上面的节点问答。直接输入你的问题即可。</p></div>}
+          {dialogMessages.map((message) => message.role === 'user' ? <div className={`user-message ${message.quote ? 'with-quote' : ''}`} key={message.id}>{message.quote && <div className="message-selection"><span><MessageSquareText size={12} />Selection</span><p>{message.quote}</p></div>}<div className="user-prompt">{message.content}</div></div> : <div className="ai-message compact-message" key={message.id}><p>{message.content}</p>{message.nodeId && <button className="topology-jump" onClick={() => setSelected(message.nodeId!)}><GitBranchIcon />已加入拓扑图 · 点击定位</button>}</div>)}
           {asking && <div className="ai-message compact-message thinking-message"><span className="mini-spinner" /><p>正在结合当前节点判断是否需要扩展知识拓扑…</p></div>}
         </div>
-        <div className="ask-box"><div className="quick-prompts"><button onClick={() => setChat(`换一个类比解释“${currentTitle}”`)}>换个类比</button><button onClick={() => setChat(`基于“${currentTitle}”给我一道变式题`)}>来道变式</button><button onClick={() => setChat(`学习“${currentTitle}”前需要补什么基础？`)}>探索前置知识</button></div><div className="ask-input"><textarea value={chat} disabled={asking} onChange={(e) => setChat(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void ask() } }} placeholder="针对当前节点追问；必要时会自动扩展左侧拓扑…" /><button onClick={() => void ask()} disabled={!chat.trim() || asking}>{asking ? <RefreshCw className="spin-icon" size={16} /> : <Send size={17} />}</button></div><small>AI 会判断问题是否值得成为新的知识节点</small></div>
+        <div className="ask-box"><div className="quick-prompts"><button onClick={() => setChat(`换一个类比解释“${currentTitle}”`)}>换个类比</button><button onClick={() => setChat(`基于“${currentTitle}”给我一道变式题`)}>来道变式</button><button onClick={() => setChat(`学习“${currentTitle}”前需要补什么基础？`)}>探索前置知识</button></div><div className={`ask-input ${chatQuote ? 'has-selection' : ''}`}>{chatQuote && <div className="composer-selection"><div><p>{chatQuote}</p><span><MessageSquareText size={12} />Selection</span></div><button type="button" aria-label="移除引用" title="移除引用" onClick={() => setChatQuote(null)}><X size={14} /></button></div>}<div className="composer-entry"><textarea ref={askInputRef} value={chat} disabled={asking} onChange={(e) => setChat(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void ask() } }} placeholder={chatQuote ? '询问关于所选内容的问题…' : isMainDialog ? '针对当前节点追问；也可以选中文字直接问 AI…' : '输入这个独立话题的问题…'} /><button className="composer-send" onClick={() => void ask()} disabled={(!chat.trim() && !chatQuote) || asking}>{asking ? <RefreshCw className="spin-icon" size={16} /> : <ArrowRight size={18} />}</button></div></div><small>{isMainDialog ? '选中文字可引用提问；AI 会判断是否扩展拓扑' : '当前对话与节点问答分开保存'}</small></div>
       </aside>
     </div>
   </div>

@@ -89,12 +89,21 @@ class VisualDocumentInfo(BaseModel):
     preview_url: str
 
 
+class CourseSection(BaseModel):
+    title: str
+    content: str
+    key_points: list[str] = Field(default_factory=list)
+    source_filename: str = ""
+    source_page: int = Field(default=1, ge=1)
+
+
 class CourseMaterialAnalysis(BaseModel):
     title: str = "课堂材料分析"
     summary: str
     learning_path: list[str] = Field(default_factory=list)
     key_concepts: list[str] = Field(default_factory=list)
     review_questions: list[str] = Field(default_factory=list)
+    sections: list[CourseSection] = Field(default_factory=list)
     raw: str | None = None
 
 
@@ -129,6 +138,8 @@ class StudyAskRequest(BaseModel):
     learning_path: list[str] = Field(default_factory=list, max_length=20)
     key_concepts: list[str] = Field(default_factory=list, max_length=30)
     existing_nodes: list[str] = Field(default_factory=list, max_length=50)
+    current_dialog_title: str = Field(default="当前节点", max_length=100)
+    allow_new_dialog: bool = True
 
 
 class StudyAskResponse(BaseModel):
@@ -136,3 +147,5 @@ class StudyAskResponse(BaseModel):
     add_node: bool = False
     node_title: str | None = None
     relation: str | None = None
+    new_dialog: bool = False
+    dialog_title: str | None = None
