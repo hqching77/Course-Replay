@@ -1,0 +1,44 @@
+.env.example
+.gitignore
+backend/README.md
+backend/app/__init__.py
+backend/app/api/__init__.py
+backend/app/api/analysis.py
+backend/app/api/courses.py
+backend/app/api/documents.py
+backend/app/api/health.py
+backend/app/config.py
+backend/app/database.py
+backend/app/main.py
+backend/app/models.py
+backend/app/schemas.py
+backend/app/services/__init__.py
+backend/app/services/ai_provider.py
+backend/app/services/chunker.py
+backend/app/services/document_service.py
+backend/app/services/material_analyzer.py
+backend/app/services/parser.py
+backend/app/services/visual_processor.py
+backend/pyproject.toml
+backend/tests/conftest.py
+backend/tests/test_courses.py
+backend/tests/test_health.py
+backend/tests/test_upload.py
+backend/uv.lock
+docs/BUILD_PLAN_TO_1700.md
+index.html
+package-lock.json
+package.json
+readme.md
+src/App.tsx
+src/data.ts
+src/main.tsx
+src/styles.css
+src/vite-env.d.ts
+testCR.pdf
+tsconfig.json
+vite.config.ts
+---dirs---
+C:\Users\hhy\.workbuddy\binaries\PortableGit\versions\1.2.0\bin\bash.exe: line 1: ls: command not found
+---root files---
+C:\Users\hhy\.workbuddy\binaries\PortableGit\versions\1.2.0\bin\bash.exe: line 1: grep: command not found
