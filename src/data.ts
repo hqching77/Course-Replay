@@ -8,6 +8,68 @@ export interface CourseAnalysis {
   review_questions: string[]
 }
 
+export type KnowledgeTier = 'prereq' | 'core' | 'advanced'
+
+export interface KnowledgeNode {
+  id: string
+  title: string
+  tier: KnowledgeTier
+  summary: string
+  /** Markdown content (GFM + LaTeX via $...$ and $$...$$). */
+  content: string
+}
+
+export const TIER_META: Record<KnowledgeTier, { label: string; eyebrow: string; order: number }> = {
+  prereq: { label: '前置知识', eyebrow: 'PREREQUISITE', order: 0 },
+  core: { label: '核心知识点', eyebrow: 'CORE · 按讲课逻辑', order: 1 },
+  advanced: { label: '进阶应用', eyebrow: 'ADVANCED', order: 2 },
+}
+
+function cleanStepText(value: string) {
+  return value.replace(/^\s*(?:第?\d+[.、)）:]|[-*•])\s*/, '').replace(/\s+/g, ' ').trim()
+}
+
+function splitStep(value: string) {
+  const clean = cleanStepText(value)
+  const separator = clean.search(/[：:。；;]/)
+  return {
+    title: (separator > 0 ? clean.slice(0, separator) : clean).trim(),
+    detail: (separator > 0 ? clean.slice(separator + 1) : '').trim(),
+  }
+}
+
+/**
+ * Build a tiered knowledge map from a backend analysis when the course has no
+ * authored `knowledgeMap`. The ordered learning path is split into
+ * 前置 / 核心 / 进阶, and each node gets its own focus, a distinct slice of the
+ * key concepts and its matching review question — so no two nodes look alike.
+ */
+export function deriveKnowledgeMap(analysis: CourseAnalysis): KnowledgeNode[] {
+  const steps = analysis.learning_path || []
+  const total = steps.length
+  if (!total) return []
+  const edge = total <= 2 ? 0 : Math.max(1, Math.round(total * 0.2))
+  const prereqEnd = edge
+  const advancedStart = total - edge
+  // Round-robin the concepts so every node owns a different, non-overlapping set.
+  const buckets: string[][] = Array.from({ length: total }, () => [])
+  ;(analysis.key_concepts || []).forEach((concept, index) => buckets[index % total].push(concept))
+  return steps.map((rawStep, index) => {
+    const { title, detail } = splitStep(rawStep)
+    const tier: KnowledgeTier = index < prereqEnd ? 'prereq' : index >= advancedStart ? 'advanced' : 'core'
+    const concepts = buckets[index]
+    const question = analysis.review_questions?.[index]
+    const summary = detail || concepts.slice(0, 2).join('、') || `第 ${index + 1} 个学习阶段`
+    const parts: string[] = [`## ${title}`]
+    if (index === 0 && analysis.summary) parts.push(analysis.summary)
+    parts.push(`**本步聚焦**：${detail || title}`)
+    if (concepts.length) parts.push(`### 相关概念\n\n${concepts.map((concept) => `- ${concept}`).join('\n')}`)
+    if (question) parts.push(`### 自测\n\n> ${question}`)
+    parts.push(`> 本节内容由「${analysis.title}」的 AI 分析整理，可在右侧向 AI 讲师追问以展开更多细节。`)
+    return { id: `analysis-${index}`, title, tier, summary, content: parts.join('\n\n') }
+  })
+}
+
 export interface ProcessingJob {
   jobId: string
   materialIds: string[]
@@ -57,7 +119,306 @@ export interface Course {
   processingJob?: ProcessingJob
   explorationNodes?: ExplorationNode[]
   chatHistory?: StudyMessage[]
+  knowledgeMap?: KnowledgeNode[]
 }
+
+export const linuxKnowledgeMap: KnowledgeNode[] = [
+  {
+    id: 'kn-os-fs',
+    tier: 'prereq',
+    title: '操作系统与文件系统树',
+    summary: '理解内核、Shell 的分层，以及一切皆文件的树状结构。',
+    content: `## 操作系统与文件系统树
+
+在敲下第一条命令前，先建立两张"地图"。
+
+### 分层模型
+
+| 层 | 作用 | 举例 |
+| --- | --- | --- |
+| **内核 Kernel** | 直接管理硬件、进程、内存 | 分配 CPU 时间片 |
+| **Shell** | 把你输入的命令翻译成系统调用 | \`bash\`、\`zsh\` |
+| **应用程序** | 完成具体任务 | \`ls\`、\`g++\` |
+
+> 引理：**一切皆文件（everything is a file）**。目录、设备、管道在 Linux 里都以文件形式统一表示。
+
+### 树状结构
+
+文件系统是一棵以根 \`/\` 为起点的树。任意文件都有唯一的绝对路径：
+
+$$\\text{绝对路径} = / \\;\\to\\; \\text{目录}_1 \\;\\to\\; \\cdots \\;\\to\\; \\text{文件}$$
+
+\`\`\`text
+/
+├── home/
+│   └── cy/        ← 你的主目录 (~)
+├── etc/           ← 系统配置
+├── usr/bin/       ← 可执行程序
+└── tmp/
+\`\`\`
+
+掌握这棵树，才能理解后面所有路径与命令。`,
+  },
+  {
+    id: 'kn-abs-rel',
+    tier: 'prereq',
+    title: '绝对路径与相对路径',
+    summary: '路径解析规则：. 、.. 、~ 的语义，是 cd 的数学基础。',
+    content: `## 绝对路径与相对路径
+
+### 三个特殊符号
+
+| 符号 | 含义 |
+| --- | --- |
+| \`.\` | 当前目录 |
+| \`..\` | 上一级目录 |
+| \`~\` | 当前用户主目录 |
+
+### 路径解析引理
+
+设当前目录为 $C$，给定路径 $p$，解析结果 $R(C, p)$ 满足：
+
+$$
+R(C, p) =
+\\begin{cases}
+p, & p \\text{ 以 } / \\text{ 开头（绝对路径）}\\\\
+C \\oplus p, & \\text{否则（相对路径，拼接后归一化）}
+\\end{cases}
+$$
+
+其中 $\\oplus$ 表示拼接后消去 \`.\` 并对每个 \`..\` 回退一级。
+
+### 例子
+
+当前在 \`/home/cy/project\`：
+
+\`\`\`bash
+cd ..        # → /home/cy
+cd ./src     # → /home/cy/src
+cd ~         # → /home/cy
+cd /etc      # → /etc （绝对，忽略当前位置）
+\`\`\``,
+  },
+  {
+    id: 'kn-path-cmd',
+    tier: 'core',
+    title: '路径符号与 pwd、ls、cd',
+    summary: '用三个命令在文件树里定位、查看、移动。',
+    content: `## 路径符号与 pwd、ls、cd
+
+这是重放的第一步：学会"我在哪、这里有什么、怎么过去"。
+
+### 三条核心命令
+
+\`\`\`bash
+pwd            # Print Working Directory：我在哪
+ls -l -a       # 列出内容（-l 详细，-a 含隐藏文件）
+cd 目标路径     # Change Directory：切换位置
+\`\`\`
+
+### 常见组合
+
+\`\`\`bash
+ls -lah        # 人类可读的详细列表
+cd -           # 回到上一次所在目录
+cd             # 不带参数 = cd ~
+\`\`\`
+
+### 自测
+
+执行 \`cd ..\`、\`cd ~\`、\`pwd\` 分别带来什么目录变化？结合相对路径与主目录解释。`,
+  },
+  {
+    id: 'kn-file-ops',
+    tier: 'core',
+    title: '文件与目录操作',
+    summary: 'mkdir、touch、cp、mv、rm 的建立、复制、移动与删除。',
+    content: `## 文件与目录操作
+
+### 命令速查
+
+| 命令 | 作用 | 常用选项 |
+| --- | --- | --- |
+| \`mkdir\` | 新建目录 | \`-p\` 递归创建 |
+| \`touch\` | 新建空文件 / 更新时间戳 | |
+| \`cp\` | 复制 | \`-r\` 递归复制目录 |
+| \`mv\` | 移动 / 重命名 | |
+| \`rm\` | 删除 | \`-r\` 递归、\`-f\` 强制 |
+
+### 典型流程
+
+\`\`\`bash
+mkdir -p project/src project/bin
+touch project/src/hello.cpp
+cp project/src/hello.cpp project/src/backup.cpp
+mv project/src/backup.cpp project/src/old.cpp
+rm project/src/old.cpp
+\`\`\`
+
+> ⚠️ \`rm -rf\` 不可撤销，执行前务必确认路径。`,
+  },
+  {
+    id: 'kn-shell',
+    tier: 'core',
+    title: 'Shell、终端与命令执行',
+    summary: '终端、CLI、Shell 的分工，以及一条命令如何被执行。',
+    content: `## Shell、终端与命令执行
+
+### 三者分工
+
+| 组件 | 角色 |
+| --- | --- |
+| **Terminal 终端** | 显示文字、接收键盘输入的窗口 |
+| **CLI** | 命令行界面这种交互"形式" |
+| **Shell** | 真正解析并执行命令的程序 |
+
+### 一条命令的旅程
+
+\`\`\`text
+键盘输入 → Terminal 显示 → Shell 解析 → 调用程序 → 内核执行 → 结果回显
+\`\`\`
+
+### 编译示例
+
+\`\`\`bash
+g++ src/hello.cpp -o bin/hello
+./bin/hello
+\`\`\`
+
+> 为什么改了 \`hello.cpp\` 要重新 \`g++\`？因为可执行文件 \`bin/hello\` 是源码的一次"快照"，源码变了快照不会自动更新。`,
+  },
+  {
+    id: 'kn-perm',
+    tier: 'core',
+    title: '用户、用户组与文件权限',
+    summary: 'rwx 权限位与 chmod 八进制计算。',
+    content: `## 用户、用户组与文件权限
+
+### 权限三元组
+
+每个文件对 **属主 / 同组 / 其他人** 各有读、写、执行三种权限：
+
+\`\`\`text
+ d rwx r-x r-x
+ │  │   │   └── others 其他人
+ │  │   └────── group  同组
+ │  └────────── user   属主
+ └───────────── 类型（d=目录, -=文件）
+\`\`\`
+
+### 八进制换算
+
+每组权限是三位二进制，按位加权：
+
+$$r = 4,\\quad w = 2,\\quad x = 1$$
+
+于是一组权限的值为 $v = 4r' + 2w' + x'$（$r',w',x' \\in \\{0,1\\}$）。例如：
+
+$$\\texttt{rwx} = 4+2+1 = 7,\\qquad \\texttt{r-x} = 4+0+1 = 5$$
+
+所以 \`rwxr-xr-x\` 对应 \`chmod 755\`：
+
+\`\`\`bash
+chmod 755 script.sh    # 属主可改，所有人可读可执行
+chmod u+x script.sh    # 另一种写法：给属主加执行权
+\`\`\``,
+  },
+  {
+    id: 'kn-text-pipe',
+    tier: 'core',
+    title: 'grep、重定向与管道',
+    summary: '把命令像流水线一样组合起来处理文本。',
+    content: `## grep、重定向与管道
+
+### 重定向
+
+| 符号 | 作用 |
+| --- | --- |
+| \`>\` | 覆盖写入文件 |
+| \`>>\` | 追加写入文件 |
+| \`<\` | 从文件读入标准输入 |
+
+### 管道
+
+管道 \`|\` 把前一个命令的 **标准输出** 接到后一个命令的 **标准输入**：
+
+$$\\text{cmd}_1 \\;\\mid\\; \\text{cmd}_2 \\;\\mid\\; \\text{cmd}_3$$
+
+### grep 实战
+
+\`\`\`bash
+ps aux | grep python          # 找出所有 python 进程
+cat access.log | grep 404 | wc -l   # 统计 404 次数
+grep -rn "TODO" src/          # 递归搜索源码里的 TODO
+\`\`\`
+
+> 比较：\`>\` 覆盖、\`>>\` 追加、\`|\` 在进程间传递数据而不落盘。`,
+  },
+  {
+    id: 'kn-script',
+    tier: 'advanced',
+    title: '编写自动化 Shell 脚本',
+    summary: '把一串命令变量化、流程化，一键重复执行。',
+    content: `## 编写自动化 Shell 脚本
+
+### 第一个脚本
+
+\`\`\`bash
+#!/usr/bin/env bash
+set -euo pipefail          # 出错即停、未定义变量报错
+
+SRC_DIR="src"
+OUT="bin/app"
+
+mkdir -p "$(dirname "$OUT")"
+g++ "$SRC_DIR"/*.cpp -o "$OUT"
+echo "构建完成 → $OUT"
+\`\`\`
+
+### 关键要素
+
+- **变量**：\`NAME="value"\`，引用用 \`"$NAME"\`
+- **条件**：\`if [ -f "$OUT" ]; then ... fi\`
+- **循环**：\`for f in *.cpp; do ...; done\`
+
+把它存成 \`build.sh\`，\`chmod +x build.sh\`，以后只需 \`./build.sh\`。`,
+  },
+  {
+    id: 'kn-ssh-tmux',
+    tier: 'advanced',
+    title: '远程开发：环境变量、SSH 与 tmux',
+    summary: 'PATH 的作用、免密登录与持久会话工作流。',
+    content: `## 远程开发：环境变量、SSH 与 tmux
+
+### PATH 环境变量
+
+Shell 按 \`PATH\` 里的目录顺序查找可执行文件：
+
+$$\\text{PATH} = d_1 : d_2 : \\cdots : d_n$$
+
+\`\`\`bash
+echo $PATH
+export PATH="$HOME/bin:$PATH"   # 把自己的 bin 放到最前
+\`\`\`
+
+### SSH 登录远程服务器
+
+\`\`\`bash
+ssh cy@server.edu.cn
+ssh-copy-id cy@server.edu.cn    # 配置免密登录
+\`\`\`
+
+### tmux 持久会话
+
+断线不丢进程，适合长时间编译 / 训练：
+
+\`\`\`bash
+tmux new -s dev     # 新建名为 dev 的会话
+# Ctrl+b d 脱离，关掉终端任务仍在跑
+tmux attach -t dev  # 重新接入
+\`\`\``,
+  },
+]
 
 export const defaultCourses: Course[] = [
   {
@@ -69,6 +430,7 @@ export const defaultCourses: Course[] = [
     mastery: 42,
     updated: '刚刚导入',
     accent: '#7dd3fc',
+    knowledgeMap: linuxKnowledgeMap,
     materials: [
       { id: 'linux-supplement-1', name: '补充材料 1：Linux基础.pdf', meta: '26 页 · 2.2 MB · 已解析', type: 'PDF', status: 'ready' },
     ],
@@ -109,7 +471,14 @@ const MASTERY_KEY = 'course-replay-mastery-v1'
 export function loadCourses(): Course[] {
   try {
     const stored = localStorage.getItem(COURSES_KEY)
-    return stored ? JSON.parse(stored) : defaultCourses
+    if (!stored) return defaultCourses
+    const parsed = JSON.parse(stored) as Course[]
+    // Backfill demo knowledge maps from defaults so existing sessions
+    // pick up newly authored content without losing chat / exploration.
+    return parsed.map((course) => {
+      const base = defaultCourses.find((item) => item.id === course.id)
+      return base?.knowledgeMap ? { ...course, knowledgeMap: base.knowledgeMap } : course
+    })
   } catch {
     return defaultCourses
   }

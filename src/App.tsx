@@ -39,7 +39,25 @@ import {
   Zap,
 } from 'lucide-react'
 import { Link, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Course, CourseAnalysis, knowledgeNodes, loadCourses, loadMastery, saveCourses, saveMastery } from './data'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
+import { Course, CourseAnalysis, KnowledgeNode, KnowledgeTier, TIER_META, deriveKnowledgeMap, knowledgeNodes, loadCourses, loadMastery, saveCourses, saveMastery } from './data'
+
+const MARKDOWN_PLUGINS = { remarkPlugins: [remarkGfm, remarkMath], rehypePlugins: [rehypeKatex] }
+const TIER_ORDER: KnowledgeTier[] = ['prereq', 'core', 'advanced']
+
+function Markdown({ children }: { children: string }) {
+  return (
+    <div className="markdown-body">
+      <ReactMarkdown remarkPlugins={MARKDOWN_PLUGINS.remarkPlugins} rehypePlugins={MARKDOWN_PLUGINS.rehypePlugins}>
+        {children}
+      </ReactMarkdown>
+    </div>
+  )
+}
 
 type Notice = { id: number; message: string }
 
@@ -538,46 +556,43 @@ function CourseDetail({ courses, setCourses, notify }: { courses: Course[]; setC
 
 function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses: Dispatch<SetStateAction<Course[]>>; notify: (message: string) => void }) {
   const course = useCourse(courses)
-  const [selected, setSelected] = useState('simplify')
-  const [activeMaterialId, setActiveMaterialId] = useState('')
+  const [selected, setSelected] = useState('')
   const [answer, setAnswer] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState(false)
   const [mastery, setMastery] = useState(loadMastery)
   const [chat, setChat] = useState('')
   const [asking, setAsking] = useState(false)
-  const replayNodes = useMemo(() => course?.analysis?.learning_path.length ? course.analysis.learning_path.map((rawStep, index) => ({
-    id: `analysis-${index}`,
-    title: formatLearningStep(rawStep).title,
-    eyebrow: index === 0 ? '当前材料' : 'AI 学习路径',
-    mastery: index === 0 ? mastery : 0,
-    duration: '按材料学习',
-    done: index === 0 && mastery >= 75,
-  })) : knowledgeNodes, [course?.analysis, mastery])
+  const kmNodes = useMemo<KnowledgeNode[]>(() => {
+    if (course?.knowledgeMap?.length) return course.knowledgeMap
+    if (course?.analysis?.learning_path.length) return deriveKnowledgeMap(course.analysis)
+    return knowledgeNodes.map((node) => ({ id: node.id, title: node.title, tier: 'core' as KnowledgeTier, summary: node.eyebrow, content: `## ${node.title}\n\n上传并分析课程材料后，这里会生成结构化的学习内容。` }))
+  }, [course?.knowledgeMap, course?.analysis])
+  const orderedNodes = useMemo(() => TIER_ORDER.flatMap((tier) => kmNodes.filter((node) => node.tier === tier)), [kmNodes])
+  const grouped = useMemo(() => TIER_ORDER.map((tier) => ({ tier, nodes: kmNodes.filter((node) => node.tier === tier) })).filter((group) => group.nodes.length), [kmNodes])
   const explorationNodes = course?.explorationNodes || []
   const chatHistory = course?.chatHistory || []
-  const topology = useMemo(() => {
-    const root = { id: 'course-root', title: course?.analysis?.title || course?.title || '课程', kind: 'root', x: 72, y: 18, parentId: undefined as string | undefined }
-    const main = replayNodes.map((node, index) => ({ ...node, kind: 'main', x: 72, y: 105 + index * 128, parentId: index === 0 ? root.id : replayNodes[index - 1].id }))
-    const branches = explorationNodes.map((node, index) => {
-      const parent = [...main, root].find((candidate) => candidate.id === node.parentId) || main[0] || root
-      const siblingsBefore = explorationNodes.slice(0, index).filter((item) => item.parentId === node.parentId).length
-      return { ...node, kind: 'branch', x: siblingsBefore % 2 === 0 ? 4 : 158, y: parent.y + 60 + Math.floor(siblingsBefore / 2) * 54 }
-    })
-    const nodes = [root, ...main, ...branches]
-    return { nodes, height: Math.max(530, ...nodes.map((node) => node.y + 105)) }
-  }, [course?.analysis?.title, course?.title, explorationNodes, replayNodes])
-  const previewMaterials = useMemo(() => course?.materials.filter((material) => material.previewUrl) || [], [course?.materials])
-  const activeMaterial = previewMaterials.find((material) => material.id === activeMaterialId) || previewMaterials[0]
 
   useEffect(() => {
-    if (replayNodes.length > 0 && !replayNodes.some((node) => node.id === selected)) setSelected(replayNodes[0].id)
-  }, [replayNodes, selected])
-
-  useEffect(() => {
-    if (previewMaterials.length > 0 && !previewMaterials.some((material) => material.id === activeMaterialId)) setActiveMaterialId(previewMaterials[0].id)
-  }, [previewMaterials, activeMaterialId])
+    if (orderedNodes.length && !orderedNodes.some((node) => node.id === selected) && !explorationNodes.some((node) => node.id === selected)) {
+      setSelected(orderedNodes[0].id)
+    }
+  }, [orderedNodes, explorationNodes, selected])
 
   if (!course) return <NotFound />
+
+  const activeIndex = orderedNodes.findIndex((node) => node.id === selected)
+  const activeKnowledge = kmNodes.find((node) => node.id === selected)
+  const activeExploration = explorationNodes.find((node) => node.id === selected)
+  const explorationAnswer = activeExploration ? (chatHistory.find((message) => message.role === 'assistant' && message.nodeId === activeExploration.id)?.content || '') : ''
+  const activeContent = activeKnowledge ? activeKnowledge.content
+    : activeExploration ? `## ${activeExploration.title}\n\n> ❓ ${activeExploration.question}\n\n${explorationAnswer || '_正在生成回答…_'}`
+    : (orderedNodes[0]?.content || '## 等待材料分析\n\n上传课件后将在这里生成结构化的学习内容。')
+  const currentTitle = activeKnowledge?.title || activeExploration?.title || orderedNodes[Math.max(activeIndex, 0)]?.title || course.analysis?.title || course.title
+  const activeTier = activeKnowledge?.tier
+  const tierLabel = activeKnowledge ? TIER_META[activeKnowledge.tier].label : activeExploration ? '探索支线' : '知识节点'
+  const tierEyebrow = activeKnowledge ? TIER_META[activeKnowledge.tier].eyebrow : 'EXPLORATION'
+  const progressPct = orderedNodes.length ? Math.max(8, ((Math.max(activeIndex, 0) + 1) / orderedNodes.length) * 100) : 8
+  const generatedQuestion = course.analysis?.review_questions[0]
 
   const submitAnswer = () => {
     if (!answer) return
@@ -593,7 +608,7 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
     if (!question || asking) return
     const userMessageId = `message-${Date.now()}-user`
     const courseId = course.id
-    const parentId = topology.nodes.some((node) => node.id === selected) ? selected : replayNodes[0]?.id || 'course-root'
+    const parentId = activeKnowledge ? selected : (activeExploration?.parentId || orderedNodes[0]?.id || 'course-root')
     setChat('')
     setAsking(true)
     setCourses((current) => current.map((item) => item.id === courseId ? {
@@ -607,11 +622,11 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
         body: JSON.stringify({
           question,
           course_title: course.title,
-          current_topic: topology.nodes.find((node) => node.id === parentId)?.title || currentTitle,
+          current_topic: currentTitle,
           summary: course.analysis?.summary || course.description,
-          learning_path: course.analysis?.learning_path || replayNodes.map((node) => node.title),
+          learning_path: course.analysis?.learning_path || kmNodes.map((node) => node.title),
           key_concepts: course.analysis?.key_concepts || course.tags,
-          existing_nodes: topology.nodes.map((node) => node.title),
+          existing_nodes: [...kmNodes.map((node) => node.title), ...explorationNodes.map((node) => node.title)],
         }),
       })
       const payload = await response.json().catch(() => ({}))
@@ -636,50 +651,44 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
       setAsking(false)
     }
   }
-  const activeIndex = replayNodes.findIndex((node) => node.id === selected)
-  const currentTitle = topology.nodes.find((node) => node.id === selected)?.title || replayNodes[Math.max(activeIndex, 0)]?.title || course.analysis?.title || course.title
-  const generatedQuestion = course.analysis?.review_questions[0]
   return <div className="replay-page">
     <div className="replay-topbar"><Link to={`/courses/${course.id}`}><ArrowLeft size={16} />{course.title}</Link><div className="replay-location"><span>课堂重放</span><ChevronRight size={14} /><strong>{currentTitle}</strong></div><div className="replay-actions"><span className="saved"><Check size={14} />分析与进度已保存</span><button className="icon-button"><PanelLeftClose size={18} /></button></div></div>
     <div className="replay-grid">
       <aside className="path-column">
-        <div className="path-head"><span className="eyebrow">LIVE KNOWLEDGE MAP</span><h2>课程知识拓扑</h2><div><span>{replayNodes.length} 个主线节点</span><span>{explorationNodes.length} 条探索支线</span></div><div className="thin-progress"><span style={{ width: `${Math.max(8, ((Math.max(activeIndex, 0) + 1) / replayNodes.length) * 100)}%` }} /></div></div>
-        <div className="topology-scroll">
-          <div className="topology-canvas" style={{ height: `${topology.height}px` }}>
-            <svg viewBox={`0 0 260 ${topology.height}`} preserveAspectRatio="none" aria-hidden="true">
-              {topology.nodes.filter((node) => node.parentId).map((node) => {
-                const parent = topology.nodes.find((candidate) => candidate.id === node.parentId)
-                if (!parent) return null
-                const isBranch = node.kind === 'branch'
-                return <path key={`${node.parentId}-${node.id}`} className={isBranch ? 'branch-edge' : 'main-edge'} d={`M ${parent.x + 55} ${parent.y + 38} C ${parent.x + 55} ${node.y - 12}, ${node.x + 50} ${parent.y + 48}, ${node.x + 50} ${node.y}`} />
+        <div className="path-head"><span className="eyebrow">LIVE KNOWLEDGE MAP</span><h2>课程知识拓扑</h2><div><span>{kmNodes.length} 个知识节点</span><span>{explorationNodes.length} 条探索支线</span></div><div className="thin-progress"><span style={{ width: `${progressPct}%` }} /></div></div>
+        <div className="tier-scroll">
+          {grouped.map((group) => <section className={`tier-group tier-${group.tier}`} key={group.tier}>
+            <header className="tier-label"><span className="tier-dot" /><div><small>{TIER_META[group.tier].eyebrow}</small><strong>{TIER_META[group.tier].label}</strong></div><span className="tier-count">{group.nodes.length}</span></header>
+            <div className="tier-nodes">
+              {group.nodes.map((node) => {
+                const globalIndex = orderedNodes.findIndex((candidate) => candidate.id === node.id)
+                const children = explorationNodes.filter((child) => child.parentId === node.id)
+                return <div className="tier-node-wrap" key={node.id}>
+                  <button className={`km-node ${selected === node.id ? 'active' : ''} ${activeIndex > -1 && globalIndex < activeIndex ? 'done' : ''}`} onClick={() => setSelected(node.id)}>
+                    <span className="km-step">{String(globalIndex + 1).padStart(2, '0')}</span>
+                    <span className="km-text"><strong>{node.title}</strong><small>{node.summary}</small></span>
+                  </button>
+                  {children.map((child) => <button key={child.id} className={`km-branch ${selected === child.id ? 'active' : ''}`} onClick={() => setSelected(child.id)}><Network size={12} /><span>{child.title}</span></button>)}
+                </div>
               })}
-              {asking && (() => { const parent = topology.nodes.find((node) => node.id === selected) || topology.nodes[0]; return <path className="pending-edge" d={`M ${parent.x + 55} ${parent.y + 38} C ${parent.x + 55} ${parent.y + 58}, 208 ${parent.y + 50}, 208 ${parent.y + 72}`} /> })()}
-            </svg>
-            {topology.nodes.map((node, index) => <button key={node.id} style={{ left: node.x, top: node.y }} onClick={() => setSelected(node.id)} className={`topology-node ${node.kind} ${selected === node.id ? 'active' : ''} ${node.kind === 'main' && 'done' in node && node.done ? 'done' : ''}`}><small>{node.kind === 'root' ? '课程' : node.kind === 'branch' ? '探索支线' : `主线 ${index}`}</small><strong>{node.title}</strong>{node.kind === 'branch' && <Network size={12} />}</button>)}
-            {asking && (() => { const parent = topology.nodes.find((node) => node.id === selected) || topology.nodes[0]; return <div className="topology-node pending" style={{ left: 158, top: parent.y + 72 }}><span className="mini-spinner" /><strong>判断是否扩展…</strong></div> })()}
-          </div>
+            </div>
+          </section>)}
+          {asking && <div className="km-pending"><span className="mini-spinner" />正在判断是否扩展支线…</div>}
         </div>
-        <div className="topology-legend"><span><i className="main" />课程主线</span><span><i className="branch" />问答新增</span></div>
-        <div className="path-tip"><Lightbulb size={16} /><p>点击节点只会切换学习焦点，拓扑图始终保留。必要的新知识会在提问后自动长成支线。</p></div>
+        <div className="topology-legend"><span><i className="t-prereq" />前置</span><span><i className="t-core" />核心</span><span><i className="t-advanced" />进阶</span><span><i className="t-branch" />问答支线</span></div>
+        <div className="path-tip"><Lightbulb size={16} /><p>内容按「前置 → 核心 → 进阶」分层。点击节点切换学习焦点，向 AI 提问会自动长出探索支线。</p></div>
       </aside>
 
       <section className="content-column">
-        <div className="content-toolbar"><div><span className="document-badge">{activeMaterial?.type || 'DOC'}</span><strong>{activeMaterial?.name || '还没有可预览的已分析材料'}</strong></div><span>{activeMaterial?.pages ? `${activeMaterial.pages} 页` : course.analysis ? '已完成分析' : '等待上传'}</span></div>
-        <div className="slide-stage">
-          {activeMaterial?.previewUrl ? (['PNG', 'JPG', 'JPEG', 'WEBP'].includes(activeMaterial.type) ? <img className="material-preview-media" src={activeMaterial.previewUrl} alt={activeMaterial.name} /> : <iframe className="material-preview-frame" src={activeMaterial.previewUrl} title={activeMaterial.name} />) : <div className="slide-paper analysis-slide">
-            <div className="slide-index">{String(Math.max(activeIndex, 0) + 1).padStart(2, '0')} <span>AI 分析 · 学习路径</span></div>
-            <h2>{replayNodes[Math.max(activeIndex, 0)]?.title || course.analysis?.title || '材料分析结果'}</h2>
-            <p className="slide-lead">{course.analysis ? trimText(course.analysis.summary, 150) : '上传课件、笔记或课本并完成分析后，这一步会显示 AI 从材料里读出的内容。'}</p>
-            {course.analysis ? <>
-              <div className="slide-block"><span>本步要点</span><p>{course.analysis.learning_path[Math.max(activeIndex, 0)] || course.analysis.title}</p></div>
-              <div className="slide-block"><span>关键概念</span><div className="slide-chips">{rotateList(course.analysis.key_concepts, Math.max(activeIndex, 0), 3).map((concept, i) => <i key={i}>{formatConceptLabel(concept)}</i>)}</div></div>
-              {course.analysis.review_questions.length > 0 && <div className="slide-block"><span>材料检验题</span><p>{course.analysis.review_questions[Math.max(activeIndex, 0) % course.analysis.review_questions.length]}</p></div>}
-              <div className="slide-foot"><span>材料依据</span><p>{activeMaterial?.name || course.materials[0]?.name || '未关联材料'}{(activeMaterial || course.materials[0])?.pages ? ` · 共 ${(activeMaterial || course.materials[0])!.pages} 页` : ''} · 第 {Math.max(activeIndex, 0) + 1} / {replayNodes.length} 步</p></div>
-            </> : <div className="slide-foot"><span>下一步</span><p>前往材料库上传材料并完成分析，这里会自动填入该知识点对应的分析内容。</p></div>}
-          </div>}
+        <div className="content-toolbar"><div><span className={`tier-badge tier-${activeTier || 'branch'}`}>{tierLabel}</span><strong>{currentTitle}</strong></div><span>{course.materials[0]?.name || (course.analysis ? '已完成分析' : '等待上传')}</span></div>
+        <div className="reading-stage">
+          <article className="reading-paper">
+            <div className="reading-index"><span>{String(Math.max(activeIndex, 0) + 1).padStart(2, '0')}</span><em>{tierEyebrow} · 学习路径</em></div>
+            <Markdown>{activeContent}</Markdown>
+          </article>
         </div>
-        <div className="source-strip"><LinkIcon size={15} /><span>已上传材料</span>{previewMaterials.length ? previewMaterials.map((material) => <button className={material.id === activeMaterial?.id ? 'active' : ''} key={material.id} onClick={() => setActiveMaterialId(material.id)}>{material.name}</button>) : <button onClick={() => notify('请先返回材料库上传并完成分析')}>暂无可预览材料</button>}</div>
-        <div className="content-nav"><button className="button ghost" onClick={() => activeIndex > 0 && setSelected(replayNodes[activeIndex - 1].id)} disabled={activeIndex <= 0}><ArrowLeft size={16} />上一步</button><span>步骤 {Math.max(activeIndex + 1, 1)} / {replayNodes.length}</span><button className="button dark" onClick={() => activeIndex < replayNodes.length - 1 && setSelected(replayNodes[activeIndex + 1].id)} disabled={activeIndex >= replayNodes.length - 1}>继续：{replayNodes[activeIndex + 1]?.title || '已到终点'} <ArrowRight size={16} /></button></div>
+        <div className="source-strip"><LinkIcon size={15} /><span>材料依据</span>{course.materials.length ? course.materials.map((material) => <button key={material.id} onClick={() => notify(`材料：${material.name}`)}>{material.name}</button>) : <button onClick={() => notify('请先返回材料库上传并完成分析')}>暂无关联材料</button>}</div>
+        <div className="content-nav"><button className="button ghost" onClick={() => activeIndex > 0 && setSelected(orderedNodes[activeIndex - 1].id)} disabled={activeIndex <= 0}><ArrowLeft size={16} />上一步</button><span>步骤 {Math.max(activeIndex + 1, 1)} / {orderedNodes.length}</span><button className="button dark" onClick={() => activeIndex > -1 && activeIndex < orderedNodes.length - 1 && setSelected(orderedNodes[activeIndex + 1].id)} disabled={activeIndex < 0 || activeIndex >= orderedNodes.length - 1}>继续：{orderedNodes[activeIndex + 1]?.title || '已到终点'} <ArrowRight size={16} /></button></div>
       </section>
 
       <aside className="ai-column">
