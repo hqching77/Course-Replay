@@ -43,12 +43,50 @@ import { Link, NavLink, Route, Routes, useLocation, useNavigate, useParams } fro
 import { Course, CourseAnalysis, knowledgeNodes, loadCourses, loadMastery, saveCourses, saveMastery } from './data'
 
 type Notice = { id: number; message: string }
+type ResumeTarget = { courseId: string; destination: 'replay' | 'review' }
+
+const LAST_STUDY_KEY = 'course-replay-last-study'
+const DISMISSED_STUDY_KEY = 'course-replay-dismissed-study'
+const LEGACY_DISMISSED_KEY = 'course-replay-resume-card-dismissed'
+
+function loadResumeTarget(courses: Course[]): ResumeTarget | null {
+  try {
+    const stored = localStorage.getItem(LAST_STUDY_KEY)
+    const target: ResumeTarget = stored ? JSON.parse(stored) : { courseId: 'digital-circuits', destination: 'replay' }
+    if (!courses.some((course) => course.id === target.courseId)) return null
+    if (localStorage.getItem(DISMISSED_STUDY_KEY) === `${target.courseId}:${target.destination}`) return null
+    if (!stored && localStorage.getItem(LEGACY_DISMISSED_KEY) === 'true') return null
+    return target
+  } catch {
+    return null
+  }
+}
 
 function App() {
   const [courses, setCourses] = useState<Course[]>(loadCourses)
   const [notices, setNotices] = useState<Notice[]>([])
+  const location = useLocation()
 
   useEffect(() => saveCourses(courses), [courses])
+
+  useEffect(() => {
+    const match = location.pathname.match(/^\/courses\/([^/]+)(?:\/(replay|review|progress))?\/?$/)
+    if (!match) return
+    let courseId: string
+    try {
+      courseId = decodeURIComponent(match[1])
+    } catch {
+      return
+    }
+    const target: ResumeTarget = { courseId, destination: match[2] === 'review' ? 'review' : 'replay' }
+    try {
+      localStorage.setItem(LAST_STUDY_KEY, JSON.stringify(target))
+      localStorage.removeItem(DISMISSED_STUDY_KEY)
+      localStorage.removeItem(LEGACY_DISMISSED_KEY)
+    } catch {
+      return
+    }
+  }, [location.pathname])
 
   const notify = (message: string) => {
     const id = Date.now()
@@ -106,7 +144,7 @@ function Sidebar() {
         <div className="profile">
           <div className="avatar">CY</div>
           <div><strong>学习者</strong><span>连续学习 7 天</span></div>
-          <MoreHorizontal size={17} />
+          <button type="button" className="icon-button tiny more-button" aria-label="更多选项"><MoreHorizontal size={17} /></button>
         </div>
       </div>
     </aside>
@@ -128,29 +166,20 @@ function PageHeader({ title, subtitle, actions }: { title: string; subtitle: str
 
 function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCourses: (courses: Course[]) => void; notify: (message: string) => void }) {
   const [showCreate, setShowCreate] = useState(false)
+  const [resumeTarget, setResumeTarget] = useState<ResumeTarget | null>(() => loadResumeTarget(courses))
   const [editingCourse, setEditingCourse] = useState<Course | null>(null)
   const [deletingCourse, setDeletingCourse] = useState<Course | null>(null)
   const [openCourseMenuId, setOpenCourseMenuId] = useState<string | null>(null)
-  const [showResume, setShowResume] = useState(() => {
-    try {
-      return localStorage.getItem('course-replay-resume-card-dismissed') !== 'true'
-    } catch {
-      return true
-    }
-  })
-  const [openCreatedCourse, setOpenCreatedCourse] = useState(false)
   const navigate = useNavigate()
+  const resumeCourse = resumeTarget ? courses.find((course) => course.id === resumeTarget.courseId) : null
   const avg = Math.round(courses.reduce((sum, item) => sum + item.mastery, 0) / Math.max(courses.length, 1))
-  const openCreateModal = (openCourseAfterCreate = false) => {
-    setOpenCreatedCourse(openCourseAfterCreate)
-    setShowCreate(true)
-  }
+  const openCreateModal = () => setShowCreate(true)
   const dismissResume = () => {
-    setShowResume(false)
+    setResumeTarget(null)
     try {
-      localStorage.setItem('course-replay-resume-card-dismissed', 'true')
+      if (resumeTarget) localStorage.setItem(DISMISSED_STUDY_KEY, `${resumeTarget.courseId}:${resumeTarget.destination}`)
     } catch {
-      notify('已退出上次学习，但浏览器无法保存此设置，刷新后会恢复。')
+      notify('已关闭继续学习卡片，但浏览器无法保存此设置，刷新后可能会恢复。')
     }
   }
   return (
@@ -162,15 +191,15 @@ function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCour
       />
 
       <section className="hero-card">
-        {showResume ? <>
+        {resumeCourse && resumeTarget ? <>
           <div className="hero-copy">
             <span className="pill lime"><Zap size={13} />继续上次学习</span>
-            <h2>逻辑函数化简</h2>
-            <p>数字电路基础 · 第 3 讲</p>
+            <h2>{resumeCourse.analysis?.title || resumeCourse.title}</h2>
+            <p>{resumeCourse.title} · {resumeTarget.destination === 'review' ? '复习工坊' : '继续学习'}</p>
             <div className="hero-progress-row"><span>课程进度</span><strong>3 / 5</strong></div>
             <div className="hero-progress"><span style={{ width: '58%' }} /></div>
             <div className="hero-actions">
-              <Link className="button light" to="/courses/digital-circuits/replay">继续课堂重放 <ArrowRight size={17} /></Link>
+              <Link className="button light" to={`/courses/${resumeCourse.id}/${resumeTarget.destination}`}>{resumeTarget.destination === 'review' ? '继续复习工坊' : '继续课堂重放'} <ArrowRight size={17} /></Link>
               <button className="button ghost hero-dismiss" onClick={dismissResume}><X size={16} />删除</button>
             </div>
           </div>
@@ -187,7 +216,7 @@ function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCour
             <span className="pill lime"><UploadCloud size={13} />开启新的学习</span>
             <h2>创建课程并上传资料</h2>
             <p>导入课件和笔记，为课程搭建专属学习路径。</p>
-            <button className="button light" onClick={() => openCreateModal(true)}>创建课程并上传资料 <ArrowRight size={17} /></button>
+            <button className="button light" onClick={openCreateModal}>创建课程并上传资料 <ArrowRight size={17} /></button>
           </div>
           <div className="hero-visual hero-upload-visual" aria-hidden="true">
             <div className="orbit orbit-one" /><div className="orbit orbit-two" />
@@ -221,12 +250,7 @@ function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCour
       </section>
 
       <section className="lower-grid">
-        <div className="panel activity-panel">
-          <div className="section-heading compact"><div><h2>最近活动</h2></div><button className="icon-button small"><MoreHorizontal size={17} /></button></div>
-          <Activity icon={<Check size={15} />} color="green" title="完成「布尔代数」知识检验" meta="数字电路基础 · 今天 14:28" badge="掌握度 +15%" />
-          <Activity icon={<MessageSquareText size={15} />} color="blue" title="探索：为什么德摩根定律可以推广？" meta="数字电路基础 · 今天 14:12" />
-          <Activity icon={<FileText size={15} />} color="orange" title="生成期中复习题单" meta="信号与系统 · 昨天 21:08" badge="12 道题" />
-        </div>
+        <RecentActivities notify={notify} />
         <div className="panel focus-panel">
           <span className="pill amber"><Sparkles size={13} />AI 学习建议</span>
           <h3>先补上“卡诺图相邻项”</h3>
@@ -234,7 +258,7 @@ function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCour
           <Link to="/courses/digital-circuits/replay" className="text-link">进入针对性复习 <ArrowRight size={15} /></Link>
         </div>
       </section>
-      {showCreate && <CreateCourseModal onClose={() => setShowCreate(false)} onCreate={(course) => { setCourses([...courses, course]); setShowCreate(false); if (openCreatedCourse) navigate(`/courses/${course.id}`); setOpenCreatedCourse(false); notify('课程已创建，可以导入材料了') }} />}
+      {showCreate && <CreateCourseModal onClose={() => setShowCreate(false)} onCreate={(course) => { setCourses([...courses, course]); setShowCreate(false); navigate(`/courses/${course.id}`); notify('课程已创建，可以导入材料了') }} />}
       {editingCourse && <EditCourseModal
         course={editingCourse}
         onClose={() => setEditingCourse(null)}
@@ -276,7 +300,7 @@ function CourseCard({ course, menuOpen, onToggleMenu, onEdit, onDelete }: {
         <div className="course-card-actions">
           <button
             type="button"
-            className="icon-button tiny"
+            className="icon-button tiny more-button"
             aria-label={`管理课程：${course.title}`}
             aria-expanded={menuOpen}
             aria-haspopup="menu"
@@ -298,8 +322,98 @@ function CourseCard({ course, menuOpen, onToggleMenu, onEdit, onDelete }: {
   )
 }
 
-function Activity({ icon, color, title, meta, badge }: { icon: ReactNode; color: string; title: string; meta: string; badge?: string }) {
-  return <div className="activity-row"><span className={`activity-icon ${color}`}>{icon}</span><div><strong>{title}</strong><small>{meta}</small></div>{badge && <span className="activity-badge">{badge}</span>}</div>
+const RECENT_ACTIVITY_DELETED_KEY = 'course-replay-deleted-activity-ids'
+const recentActivities = [
+  { id: 'boolean-algebra-check', icon: Check, color: 'green', title: '完成「布尔代数」知识检验', meta: '数字电路基础 · 今天 14:28', badge: '掌握度 +15%' },
+  { id: 'de-morgan-exploration', icon: MessageSquareText, color: 'blue', title: '探索：为什么德摩根定律可以推广？', meta: '数字电路基础 · 今天 14:12' },
+  { id: 'midterm-review', icon: FileText, color: 'orange', title: '生成期中复习题单', meta: '信号与系统 · 昨天 21:08', badge: '12 道题' },
+]
+
+function RecentActivities({ notify }: { notify: (message: string) => void }) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [deletedIds, setDeletedIds] = useState<string[]>(() => {
+    try {
+      const stored: unknown = JSON.parse(localStorage.getItem(RECENT_ACTIVITY_DELETED_KEY) || '[]')
+      return Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : []
+    } catch {
+      return []
+    }
+  })
+  const menuRef = useRef<HTMLDivElement>(null)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
+  const editButtonRef = useRef<HTMLButtonElement>(null)
+  const visibleActivities = recentActivities.filter((activity) => !deletedIds.includes(activity.id))
+
+  useEffect(() => {
+    if (!menuOpen) return
+    editButtonRef.current?.focus()
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) setMenuOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMenuOpen(false)
+        menuButtonRef.current?.focus()
+      }
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [menuOpen])
+
+  const deleteActivity = (id: string) => {
+    const nextDeletedIds = [...deletedIds, id]
+    setDeletedIds(nextDeletedIds)
+    try {
+      localStorage.setItem(RECENT_ACTIVITY_DELETED_KEY, JSON.stringify(nextDeletedIds))
+      notify('活动已删除')
+    } catch {
+      notify('活动已移除，但浏览器无法保存，刷新后会恢复。')
+    }
+  }
+
+  return (
+    <div className="panel activity-panel">
+      <div className="section-heading compact">
+        <div><h2>最近活动</h2></div>
+        <div className="activity-actions" ref={menuRef} onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) setMenuOpen(false)
+        }}>
+          {editing && <button type="button" className="text-button" onClick={() => { setEditing(false); setMenuOpen(false) }}>完成</button>}
+          <button
+            ref={menuButtonRef}
+            type="button"
+            aria-label="最近活动更多选项"
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            aria-controls={menuOpen ? 'recent-activity-menu' : undefined}
+            className="icon-button small more-button"
+            onClick={() => setMenuOpen((open) => !open)}
+          ><MoreHorizontal size={17} /></button>
+          {menuOpen && <div id="recent-activity-menu" className="course-action-menu" role="menu" aria-label="最近活动操作">
+            <button ref={editButtonRef} type="button" role="menuitem" onClick={() => {
+              setEditing(true)
+              setMenuOpen(false)
+              menuButtonRef.current?.focus()
+            }}><Pencil size={14} />编辑</button>
+          </div>}
+        </div>
+      </div>
+      {visibleActivities.map(({ id, icon: Icon, color, title, meta, badge }) => (
+        <div className={`activity-row${editing ? ' editing' : ''}`} key={id}>
+          {editing && <button type="button" className="activity-delete" aria-label={`删除活动：${title}`} title="删除活动" onClick={() => deleteActivity(id)}><X size={14} strokeWidth={2.5} /></button>}
+          <span className={`activity-icon ${color}`}><Icon size={15} /></span>
+          <div><strong>{title}</strong><small>{meta}</small></div>
+          {badge && <span className="activity-badge">{badge}</span>}
+        </div>
+      ))}
+      {visibleActivities.length === 0 && <p className="activity-empty" role="status">暂无最近活动</p>}
+    </div>
+  )
 }
 
 function CreateCourseModal({ onClose, onCreate }: { onClose: () => void; onCreate: (course: Course) => void }) {
@@ -506,7 +620,7 @@ function CourseDetail({ courses, setCourses, notify }: { courses: Course[]; setC
         {apiError && <div className="api-error"><CircleHelp size={18} /><div><strong>材料处理失败</strong><p>{apiError}</p></div></div>}
         {analysis && <div className="analysis-result"><div className="analysis-result-head"><span><Sparkles size={16} /></span><div><small>AI MATERIAL ANALYSIS · 已自动保存</small><h3>{analysis.title}</h3></div><Link className="button primary compact analysis-action" to={`/courses/${course.id}/replay`}>进入课堂重放 <ArrowRight size={14} /></Link></div><p>{analysis.summary}</p>{analysis.learning_path.length > 0 && <div className="analysis-path">{analysis.learning_path.map((step, index) => <span key={`${step}-${index}`}><i>{index + 1}</i>{step}</span>)}</div>}{analysis.key_concepts.length > 0 && <div className="analysis-concepts">{analysis.key_concepts.map((concept, index) => <span key={`${concept}-${index}`}>{concept}</span>)}</div>}</div>}
         <div className="file-list">
-          {course.materials.map((material) => <div className="file-row" key={material.id}><span className={`file-type ${material.type.toLowerCase()}`}><FileText size={18} /></span><div className="file-info"><strong>{material.name}</strong><span title={material.error}>{material.error || material.meta}</span></div>{material.previewUrl && <a className="file-preview-link" href={material.previewUrl} target="_blank" rel="noreferrer">查看文档</a>}<div className={`status ${material.status}`}>{material.status === 'ready' ? <><CheckCircle2 size={15} />已就绪</> : material.status === 'failed' ? <><X size={14} />失败</> : material.status === 'cancelled' ? <><X size={14} />已取消</> : <><RefreshCw size={14} />AI 处理中</>}</div><button className="icon-button tiny"><MoreHorizontal size={17} /></button></div>)}
+          {course.materials.map((material) => <div className="file-row" key={material.id}><span className={`file-type ${material.type.toLowerCase()}`}><FileText size={18} /></span><div className="file-info"><strong>{material.name}</strong><span title={material.error}>{material.error || material.meta}</span></div>{material.previewUrl && <a className="file-preview-link" href={material.previewUrl} target="_blank" rel="noreferrer">查看文档</a>}<div className={`status ${material.status}`}>{material.status === 'ready' ? <><CheckCircle2 size={15} />已就绪</> : material.status === 'failed' ? <><X size={14} />失败</> : material.status === 'cancelled' ? <><X size={14} />已取消</> : <><RefreshCw size={14} />AI 处理中</>}</div><button type="button" aria-label={`材料更多选项：${material.name}`} className="icon-button tiny more-button"><MoreHorizontal size={17} /></button></div>)}
         </div>
       </section>
       <aside className="right-stack">
@@ -527,6 +641,8 @@ function Replay({ courses, notify }: { courses: Course[]; notify: (message: stri
   const [chat, setChat] = useState('')
   const [messages, setMessages] = useState<string[]>([])
   const [branch, setBranch] = useState(false)
+  const [aiMinimized, setAiMinimized] = useState(false)
+  const [aiMenuOpen, setAiMenuOpen] = useState(false)
   const replayNodes = useMemo(() => course?.analysis?.learning_path.length ? course.analysis.learning_path.map((title, index) => ({
     id: `analysis-${index}`,
     title,
@@ -566,7 +682,7 @@ function Replay({ courses, notify }: { courses: Course[]; notify: (message: stri
   const generatedQuestion = course.analysis?.review_questions[0]
   return <div className="replay-page">
     <div className="replay-topbar"><Link to={`/courses/${course.id}`}><ArrowLeft size={16} />{course.title}</Link><div className="replay-location"><span>课堂重放</span><ChevronRight size={14} /><strong>{currentTitle}</strong></div><div className="replay-actions"><span className="saved"><Check size={14} />分析与进度已保存</span><button className="icon-button"><PanelLeftClose size={18} /></button></div></div>
-    <div className="replay-grid">
+    <div className={`replay-grid ${aiMinimized ? 'ai-minimized' : ''}`}>
       <aside className="path-column">
         <div className="path-head"><span className="eyebrow">{course.analysis ? 'AI COURSE PATH' : 'LEARNING PATH'}</span><h2>课程主线</h2><div><span>{Math.max(activeIndex + 1, 1)} / {replayNodes.length}</span><span>{mastery}% 掌握</span></div><div className="thin-progress"><span style={{ width: `${Math.max(8, ((activeIndex + 1) / replayNodes.length) * 100)}%` }} /></div></div>
         <div className="knowledge-list">{replayNodes.map((node, index) => <button key={node.id} onClick={() => setSelected(node.id)} className={`knowledge-item ${selected === node.id ? 'active' : ''} ${node.done ? 'done' : ''}`}><span className="knowledge-number">{node.done ? <Check size={13} /> : index + 1}</span><div><small>{node.eyebrow}</small><strong>{node.title}</strong><span>{node.duration} · {node.mastery ? `${node.mastery}% 掌握` : '尚未开始'}</span></div>{selected === node.id && <ChevronRight size={16} />}</button>)}</div>
@@ -591,8 +707,8 @@ function Replay({ courses, notify }: { courses: Course[]; notify: (message: stri
         <div className="content-nav"><button className="button ghost" onClick={() => activeIndex > 0 && setSelected(replayNodes[activeIndex - 1].id)} disabled={activeIndex <= 0}><ArrowLeft size={16} />上一步</button><span>步骤 {Math.max(activeIndex + 1, 1)} / {replayNodes.length}</span><button className="button dark" onClick={() => activeIndex < replayNodes.length - 1 && setSelected(replayNodes[activeIndex + 1].id)} disabled={activeIndex >= replayNodes.length - 1}>继续：{replayNodes[activeIndex + 1]?.title || '已到终点'} <ArrowRight size={16} /></button></div>
       </section>
 
-      <aside className="ai-column">
-        <div className="ai-head"><div><span className="ai-avatar"><Bot size={19} /></span><div><strong>AI 讲师</strong><small><span className="online-dot" />基于 {course.materials.filter((item) => item.status === 'ready').length} 份课程材料</small></div></div><button className="icon-button tiny"><MoreHorizontal size={17} /></button></div>
+      {!aiMinimized && <aside className="ai-column">
+        <div className="ai-head"><div><span className="ai-avatar"><Bot size={19} /></span><div><strong>AI 讲师</strong><small><span className="online-dot" />基于 {course.materials.filter((item) => item.status === 'ready').length} 份课程材料</small></div></div><div className="ai-head-actions"><button type="button" aria-label="AI 讲师更多选项" aria-expanded={aiMenuOpen} className="icon-button tiny more-button" onClick={() => setAiMenuOpen((open) => !open)}><MoreHorizontal size={17} /></button>{aiMenuOpen && <div className="ai-action-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setAiMenuOpen(false); setAiMinimized(true) }}><PanelLeftClose size={14} />最小化</button></div>}</div></div>
         <div className="chat-scroll">
           {branch && <div className="branch-banner"><span><GitBranchIcon />探索支线 · 深度 1</span><button onClick={() => setBranch(false)}>返回主线</button></div>}
           <div className="ai-message"><p>{course.analysis?.summary || <>观察这个卡诺图。橙色圈跨过了左右边界——因为卡诺图的列按 <strong>00、01、11、10</strong> 排列，首尾依然只相差一个变量。</>}</p><div className="citation-row">{course.materials.slice(0, 2).map((material, index) => <button key={material.id}>[{index + 1}] {material.name}</button>)}</div></div>
@@ -603,8 +719,9 @@ function Replay({ courses, notify }: { courses: Course[]; notify: (message: stri
           {messages.map((message, index) => <div key={index}><div className="user-message">{message}</div><div className="ai-message compact-message"><p>从课程材料看，相邻项合并的本质是<strong>消去发生变化的变量</strong>。这里可以把边界想成首尾相接的圆环。</p><div className="citation-row"><button>[1] 第 12 页</button></div></div></div>)}
         </div>
         <div className="ask-box"><div className="quick-prompts"><button onClick={() => setChat('换一个类比解释')}>换个类比</button><button onClick={() => setChat('给我一道变式题')}>来道变式</button><button onClick={() => setBranch(true)}>探索前置知识</button></div><div className="ask-input"><textarea value={chat} onChange={(e) => setChat(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask() } }} placeholder="针对课件、笔记或当前知识点追问…" /><button onClick={ask} disabled={!chat.trim()}><Send size={17} /></button></div><small>回答会区分课程材料与补充理解</small></div>
-      </aside>
+      </aside>}
     </div>
+    {aiMinimized && <button type="button" className="ai-restore-button" aria-label="恢复 AI 讲师" title="恢复 AI 讲师" onClick={() => setAiMinimized(false)}><Bot size={22} /></button>}
   </div>
 }
 
