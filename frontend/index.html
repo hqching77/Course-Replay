@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f6f7f9" />
+    <title>Course Replay · 我的课程</title>
+  </head>
+  <body>
+    <div id="root">
+      <section style="max-width:620px;margin:12vh auto;padding:28px;font-family:system-ui,sans-serif;line-height:1.8;color:#253c31" role="status">
+        <h1>Course Replay</h1>
+        <p id="startup-message">正在启动课程空间…</p>
+        <div id="startup-help" hidden>
+          <p>请在 frontend 目录中安装依赖并启动开发服务：</p>
+          <pre style="background:#f0f4f1;padding:16px;overflow:auto">pnpm install<br>pnpm dev</pre>
+          <p>然后打开终端显示的本地 HTTP 地址。不能直接双击源码 index.html。</p>
+        </div>
+        <noscript>请启用 JavaScript 后重新加载页面。</noscript>
+      </section>
+    </div>
+    <script>
+      (function () {
+        function showFailure(message) {
+          var target = document.getElementById('startup-message');
+          var help = document.getElementById('startup-help');
+          if (target) target.textContent = message;
+          if (help) help.hidden = false;
+        }
+        if (location.protocol === 'file:') {
+          showFailure('当前打开的是源码文件，课程页面需要通过本地开发服务访问。');
+        } else {
+          window.addEventListener('error', function () {
+            showFailure('页面脚本未能启动，请检查开发服务和终端报错。');
+          }, true);
+          window.addEventListener('unhandledrejection', function () {
+            showFailure('页面启动失败，请检查开发服务和终端报错。');
+          });
+          setTimeout(function () {
+            showFailure('页面仍未启动，请确认依赖已安装且开发服务正在运行。');
+          }, 15000);
+        }
+      })();
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
