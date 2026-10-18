@@ -24,10 +24,10 @@ import {
   MoreHorizontal,
   Network,
   PanelLeftClose,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
-  Send,
   Settings,
   Sparkles,
   Target,
@@ -52,6 +52,24 @@ function Markdown({ children }: { children: string }) {
 }
 
 type Notice = { id: number; message: string }
+type ResumeTarget = { courseId: string; destination: 'replay' }
+
+const LAST_STUDY_KEY = 'course-replay-last-study'
+const DISMISSED_STUDY_KEY = 'course-replay-dismissed-study'
+const LEGACY_DISMISSED_KEY = 'course-replay-resume-card-dismissed'
+
+function loadResumeTarget(courses: Course[]): ResumeTarget | null {
+  try {
+    const stored = localStorage.getItem(LAST_STUDY_KEY)
+    const target: ResumeTarget = stored ? JSON.parse(stored) : { courseId: courses.find((course) => course.id === 'programming-linux')?.id || courses[0]?.id || '', destination: 'replay' }
+    if (!courses.some((course) => course.id === target.courseId)) return null
+    if (localStorage.getItem(DISMISSED_STUDY_KEY) === `${target.courseId}:${target.destination}`) return null
+    if (!stored && localStorage.getItem(LEGACY_DISMISSED_KEY) === 'true') return null
+    return { courseId: target.courseId, destination: 'replay' }
+  } catch {
+    return null
+  }
+}
 
 function trimText(value: string, limit: number) {
   const clean = value.replace(/\s+/g, ' ').trim()
@@ -87,8 +105,28 @@ function courseSubtitle(course: Course) {
 function App() {
   const [courses, setCourses] = useState<Course[]>(loadCourses)
   const [notices, setNotices] = useState<Notice[]>([])
+  const location = useLocation()
 
   useEffect(() => saveCourses(courses), [courses])
+
+  useEffect(() => {
+    const match = location.pathname.match(/^\/courses\/([^/]+)(?:\/(replay))?\/?$/)
+    if (!match) return
+    let courseId: string
+    try {
+      courseId = decodeURIComponent(match[1])
+    } catch {
+      return
+    }
+    const target: ResumeTarget = { courseId, destination: 'replay' }
+    try {
+      localStorage.setItem(LAST_STUDY_KEY, JSON.stringify(target))
+      localStorage.removeItem(DISMISSED_STUDY_KEY)
+      localStorage.removeItem(LEGACY_DISMISSED_KEY)
+    } catch {
+      return
+    }
+  }, [location.pathname])
 
   const notify = (message: string) => {
     const id = Date.now()
@@ -98,7 +136,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar />
+      <Sidebar courses={courses} />
       <main className="main-shell">
         <Routes>
           <Route path="/" element={<Dashboard courses={courses} setCourses={setCourses} notify={notify} />} />
@@ -117,10 +155,10 @@ function App() {
   )
 }
 
-function Sidebar() {
+function Sidebar({ courses }: { courses: Course[] }) {
   const location = useLocation()
   const courseMatch = location.pathname.match(/\/courses\/([^/]+)/)
-  const courseId = courseMatch?.[1] || 'digital-circuits'
+  const courseId = courseMatch?.[1] || loadResumeTarget(courses)?.courseId || courses[0]?.id || ''
   return (
     <aside className="sidebar">
       <Link className="brand" to="/" aria-label="Course Replay 首页">
@@ -136,7 +174,7 @@ function Sidebar() {
         <div className="profile">
           <div className="avatar">CY</div>
           <div><strong>学习者</strong><span>连续学习 7 天</span></div>
-          <MoreHorizontal size={17} />
+          <button type="button" className="icon-button tiny more-button" aria-label="更多选项"><MoreHorizontal size={17} /></button>
         </div>
       </div>
     </aside>
@@ -158,32 +196,65 @@ function PageHeader({ title, subtitle, actions }: { title: string; subtitle: str
 
 function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCourses: (courses: Course[]) => void; notify: (message: string) => void }) {
   const [showCreate, setShowCreate] = useState(false)
+  const [resumeTarget, setResumeTarget] = useState<ResumeTarget | null>(() => loadResumeTarget(courses))
+  const [editingCourse, setEditingCourse] = useState<Course | null>(null)
+  const [deletingCourse, setDeletingCourse] = useState<Course | null>(null)
+  const [openCourseMenuId, setOpenCourseMenuId] = useState<string | null>(null)
+  const navigate = useNavigate()
+  const resumeCourse = resumeTarget ? courses.find((course) => course.id === resumeTarget.courseId) : null
   const avg = Math.round(courses.reduce((sum, item) => sum + item.mastery, 0) / Math.max(courses.length, 1))
+  const openCreateModal = () => setShowCreate(true)
+  const dismissResume = () => {
+    setResumeTarget(null)
+    try {
+      if (resumeTarget) localStorage.setItem(DISMISSED_STUDY_KEY, `${resumeTarget.courseId}:${resumeTarget.destination}`)
+    } catch {
+      notify('已关闭继续学习卡片，但浏览器无法保存此设置，刷新后可能会恢复。')
+    }
+  }
   return (
     <div className="page dashboard-page">
       <PageHeader
         title="下午好，准备继续吗？"
-        subtitle="把散落的课件与笔记，重新串成一条能真正掌握的学习路径。"
-        actions={<><button className="icon-button" aria-label="搜索"><Search size={19} /></button><button className="button primary" onClick={() => setShowCreate(true)}><Plus size={18} />创建课程</button></>}
+        subtitle="把散落的课件和笔记，重新串成一条能真正掌握的学习路径。"
+        actions={<><button className="icon-button" aria-label="搜索"><Search size={19} /></button><button className="button primary" onClick={() => openCreateModal()}><Plus size={18} />创建课程</button></>}
       />
 
       <section className="hero-card">
-        <div className="hero-copy">
-          <span className="pill lime"><Zap size={13} />继续上次学习</span>
-          <h2>Shell、终端与命令执行</h2>
-          <p>计算机程序设计基础（1）· 补充材料 1</p>
-          <div className="hero-progress-row"><span>课程进度</span><strong>3 / 5</strong></div>
-          <div className="hero-progress"><span style={{ width: '58%' }} /></div>
-          <Link className="button light" to="/courses/programming-linux/replay">继续课堂重放 <ArrowRight size={17} /></Link>
-        </div>
-        <div className="hero-visual" aria-hidden="true">
-          <div className="orbit orbit-one" /><div className="orbit orbit-two" />
-          <div className="hero-node main-node"><BrainCircuit size={29} /><span>化简</span></div>
-          <div className="hero-node node-a">A · B</div>
-          <div className="hero-node node-b">A + B</div>
-          <div className="hero-node node-c">K-map</div>
-          <span className="connector connector-a" /><span className="connector connector-b" /><span className="connector connector-c" />
-        </div>
+        {resumeCourse && resumeTarget ? <>
+          <div className="hero-copy">
+            <span className="pill lime"><Zap size={13} />继续上次学习</span>
+            <h2>{resumeCourse.analysis?.title || resumeCourse.title}</h2>
+            <p>{resumeCourse.title} · 继续学习</p>
+            <div className="hero-progress-row"><span>课程进度</span><strong>3 / 5</strong></div>
+            <div className="hero-progress"><span style={{ width: '58%' }} /></div>
+            <div className="hero-actions">
+              <Link className="button light" to={`/courses/${resumeCourse.id}/${resumeTarget.destination}`}>继续课堂重放 <ArrowRight size={17} /></Link>
+              <button className="button ghost hero-dismiss" onClick={dismissResume}><X size={16} />删除</button>
+            </div>
+          </div>
+          <div className="hero-visual" aria-hidden="true">
+            <div className="orbit orbit-one" /><div className="orbit orbit-two" />
+            <div className="hero-node main-node"><BrainCircuit size={29} /><span>化简</span></div>
+            <div className="hero-node node-a">A · B</div>
+            <div className="hero-node node-b">A + B</div>
+            <div className="hero-node node-c">K-map</div>
+            <span className="connector connector-a" /><span className="connector connector-b" /><span className="connector connector-c" />
+          </div>
+        </> : <>
+          <div className="hero-copy hero-create-copy">
+            <span className="pill lime"><UploadCloud size={13} />开启新的学习</span>
+            <h2>创建课程并上传资料</h2>
+            <p>导入课件和笔记，为课程搭建专属学习路径。</p>
+            <button className="button light" onClick={openCreateModal}>创建课程并上传资料 <ArrowRight size={17} /></button>
+          </div>
+          <div className="hero-visual hero-upload-visual" aria-hidden="true">
+            <div className="orbit orbit-one" /><div className="orbit orbit-two" />
+            <div className="upload-center"><UploadCloud size={30} /><span>上传资料</span></div>
+            <div className="upload-file upload-file-a"><FileText size={15} />课堂课件</div>
+            <div className="upload-file upload-file-b"><FileText size={15} />学习笔记</div>
+          </div>
+        </>}
       </section>
 
       <section className="metric-grid">
@@ -196,12 +267,37 @@ function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCour
       <section className="section-block">
         <div className="section-heading"><div><h2>我的课程</h2><p>每门课都有独立的材料库与知识路径</p></div><button className="text-button">查看全部 <ArrowRight size={15} /></button></div>
         <div className="course-grid">
-          {courses.map((course) => <CourseCard key={course.id} course={course} />)}
-          <button className="new-course-card" onClick={() => setShowCreate(true)}><span><Plus size={22} /></span><strong>创建新课程</strong><small>导入课件，开始构建知识路径</small></button>
+          {courses.map((course) => <CourseCard
+            key={course.id}
+            course={course}
+            menuOpen={openCourseMenuId === course.id}
+            onToggleMenu={() => setOpenCourseMenuId(openCourseMenuId === course.id ? null : course.id)}
+            onEdit={() => { setOpenCourseMenuId(null); setEditingCourse(course) }}
+            onDelete={() => { setOpenCourseMenuId(null); setDeletingCourse(course) }}
+          />)}
+          <button className="new-course-card" onClick={() => openCreateModal()}><span><Plus size={22} /></span><strong>创建新课程</strong><small>导入课件，开始构建知识路径</small></button>
         </div>
       </section>
 
-      {showCreate && <CreateCourseModal onClose={() => setShowCreate(false)} onCreate={(course) => { setCourses([...courses, course]); setShowCreate(false); notify('课程已创建，可以导入材料了') }} />}
+      {showCreate && <CreateCourseModal onClose={() => setShowCreate(false)} onCreate={(course) => { setCourses([...courses, course]); setShowCreate(false); navigate(`/courses/${course.id}`); notify('课程已创建，可以导入材料了') }} />}
+      {editingCourse && <EditCourseModal
+        course={editingCourse}
+        onClose={() => setEditingCourse(null)}
+        onSave={(title, description) => {
+          setCourses(courses.map((course) => course.id === editingCourse.id ? { ...course, title, description, updated: '刚刚' } : course))
+          setEditingCourse(null)
+          notify('课程信息已更新')
+        }}
+      />}
+      {deletingCourse && <DeleteCourseModal
+        course={deletingCourse}
+        onClose={() => setDeletingCourse(null)}
+        onConfirm={() => {
+          setCourses(courses.filter((course) => course.id !== deletingCourse.id))
+          setDeletingCourse(null)
+          notify('课程已删除')
+        }}
+      />}
     </div>
   )
 }
@@ -210,16 +306,40 @@ function Metric({ icon, label, value, delta, positive }: { icon: ReactNode; labe
   return <div className="metric"><div className="metric-icon">{icon}</div><div><span>{label}</span><strong>{value}</strong><small className={positive ? 'positive' : ''}>{delta}</small></div></div>
 }
 
-function CourseCard({ course }: { course: Course }) {
-  const displayedMastery = course.id === 'programming-linux' ? loadMastery() : course.mastery
+function CourseCard({ course, menuOpen, onToggleMenu, onEdit, onDelete }: {
+  course: Course
+  menuOpen: boolean
+  onToggleMenu: () => void
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  const displayedMastery = ['digital-circuits', 'programming-linux'].includes(course.id) ? loadMastery() : course.mastery
   return (
-    <Link to={`/courses/${course.id}`} className="course-card">
-      <div className="course-card-top"><span className="course-swatch" style={{ background: course.accent }} /><button className="icon-button tiny" onClick={(event) => event.preventDefault()}><MoreHorizontal size={16} /></button></div>
-      <div className="course-code">{course.code}</div><h3>{course.title}</h3><p>{courseSubtitle(course)}</p>
-      <div className="tag-row">{course.tags.map((tag, index) => <span key={`${tag}-${index}`} title={tag}>{formatConceptLabel(tag)}</span>)}</div>
-      <div className="card-divider" />
-      <div className="course-footer"><div><span>{course.materials.length} 份材料</span><small>最近学习 {course.updated}</small></div><div className="ring" style={{ '--value': `${displayedMastery * 3.6}deg`, '--accent': course.accent } as React.CSSProperties}><span>{displayedMastery}%</span></div></div>
-    </Link>
+    <article className="course-card">
+      <div className="course-card-top">
+        <span className="course-swatch" style={{ background: course.accent }} />
+        <div className="course-card-actions">
+          <button
+            type="button"
+            className="icon-button tiny more-button"
+            aria-label={`管理课程：${course.title}`}
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            onClick={onToggleMenu}
+          ><MoreHorizontal size={16} /></button>
+          {menuOpen && <div className="course-action-menu" role="menu">
+            <button type="button" role="menuitem" onClick={onEdit}><Pencil size={14} />编辑课程</button>
+            <button type="button" role="menuitem" className="delete-action" onClick={onDelete}><Trash2 size={14} />删除课程</button>
+          </div>}
+        </div>
+      </div>
+      <Link to={`/courses/${course.id}`} className="course-card-content">
+        <div className="course-code">{course.code}</div><h3>{course.title}</h3><p>{courseSubtitle(course)}</p>
+        <div className="tag-row">{course.tags.map((tag, index) => <span key={`${tag}-${index}`} title={tag}>{formatConceptLabel(tag)}</span>)}</div>
+        <div className="card-divider" />
+        <div className="course-footer"><div><span>{course.materials.length} 份材料</span><small>最近学习 {course.updated}</small></div><div className="ring" style={{ '--value': `${displayedMastery * 3.6}deg`, '--accent': course.accent } as React.CSSProperties}><span>{displayedMastery}%</span></div></div>
+      </Link>
+    </article>
   )
 }
 
@@ -233,6 +353,42 @@ function CreateCourseModal({ onClose, onCreate }: { onClose: () => void; onCreat
     onCreate({ id, title: title.trim(), description: description.trim() || '一门新的课程，等待导入学习材料。', code: 'NEW · 2026 秋', tags: ['新课程'], mastery: 0, materials: [], updated: '刚刚', accent: '#c7f45d' })
   }
   return <div className="modal-backdrop" onMouseDown={onClose}><form className="modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">NEW COURSE</span><h2>创建一门课程</h2></div><button type="button" className="icon-button" onClick={onClose}><X size={18} /></button></div><label>课程名称<input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如：数字信号处理" /></label><label>课程简介<textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="这门课主要学习什么？" /></label><div className="modal-actions"><button type="button" className="button ghost" onClick={onClose}>取消</button><button className="button primary" disabled={!title.trim()}>创建并导入材料 <ArrowRight size={16} /></button></div></form></div>
+}
+
+function EditCourseModal({ course, onClose, onSave }: {
+  course: Course
+  onClose: () => void
+  onSave: (title: string, description: string) => void
+}) {
+  const [title, setTitle] = useState(course.title)
+  const [description, setDescription] = useState(course.description)
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    if (!title.trim()) return
+    onSave(title.trim(), description.trim())
+  }
+  return <div className="modal-backdrop" onMouseDown={onClose}>
+    <form className="modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
+      <div className="modal-head"><div><span className="eyebrow">EDIT COURSE</span><h2>编辑课程</h2></div><button type="button" className="icon-button" aria-label="关闭" onClick={onClose}><X size={18} /></button></div>
+      <label>课程名称<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="输入课程名称" /></label>
+      <label>课程介绍<textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="输入课程介绍" /></label>
+      <div className="modal-actions"><button type="button" className="button ghost" onClick={onClose}>取消</button><button className="button primary" disabled={!title.trim()}>保存修改</button></div>
+    </form>
+  </div>
+}
+
+function DeleteCourseModal({ course, onClose, onConfirm }: {
+  course: Course
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  return <div className="modal-backdrop" onMouseDown={onClose}>
+    <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-course-title" onMouseDown={(event) => event.stopPropagation()}>
+      <div className="modal-head"><div><span className="eyebrow">DELETE COURSE</span><h2 id="delete-course-title">删除课程？</h2></div><button type="button" className="icon-button" aria-label="关闭" onClick={onClose}><X size={18} /></button></div>
+      <p className="delete-course-message">确定删除“{course.title}”吗？此操作会从本地课程列表中移除该课程。</p>
+      <div className="modal-actions"><button type="button" className="button ghost" onClick={onClose}>取消</button><button type="button" className="button danger" onClick={onConfirm}>删除课程</button></div>
+    </div>
+  </div>
 }
 
 function useCourse(courses: Course[]) {
@@ -522,6 +678,8 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
   const [selected, setSelected] = useState('')
   const [activeMaterialId, setActiveMaterialId] = useState('')
   const [chat, setChat] = useState('')
+  const [aiMinimized, setAiMinimized] = useState(false)
+  const [aiMenuOpen, setAiMenuOpen] = useState(false)
   const [chatQuote, setChatQuote] = useState<string | null>(null)
   const [asking, setAsking] = useState(false)
   const [selectionAsk, setSelectionAsk] = useState<{ text: string; left: number; top: number } | null>(null)
@@ -619,7 +777,7 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
       if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' })
     })
     return () => cancelAnimationFrame(frame)
-  }, [activeDialogId, asking, latestDialogMessageId, explorationNodes.length])
+  }, [activeDialogId, aiMinimized, asking, latestDialogMessageId, explorationNodes.length])
 
   useEffect(() => {
     const dismissSelectionAsk = () => setSelectionAsk(null)
@@ -680,6 +838,7 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
 
   const quoteSelectionInChat = () => {
     if (!selectionAsk) return
+    setAiMinimized(false)
     setChatQuote(selectionAsk.text)
     setSelectionAsk(null)
     window.getSelection()?.removeAllRanges()
@@ -768,7 +927,7 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
   return <div className="replay-page" ref={replayPageRef} onMouseUp={captureTextSelection} onTouchEnd={captureTextSelection}>
     {selectionAsk && <button className="selection-ask" style={{ left: selectionAsk.left, top: selectionAsk.top }} onMouseDown={(event) => event.preventDefault()} onClick={quoteSelectionInChat}><MessageSquareText size={14} />问 AI</button>}
     <div className="replay-topbar"><Link to={`/courses/${course.id}`}><ArrowLeft size={16} />{course.title}</Link><div className="replay-location"><span>课堂重放</span><ChevronRight size={14} /><strong>{currentTitle}</strong></div><div className="replay-actions"><span className="saved"><Check size={14} />分析与进度已保存</span><button className="icon-button"><PanelLeftClose size={18} /></button></div></div>
-    <div className="replay-grid">
+    <div className={`replay-grid ${aiMinimized ? 'ai-minimized' : ''}`}>
       <aside className="path-column">
         <div className="path-head"><span className="eyebrow">LIVE KNOWLEDGE MAP</span><h2>课程知识拓扑</h2><div><span>{kmNodes.length} 个知识节点</span><span>{explorationNodes.length} 条探索支线</span></div><div className="thin-progress"><span style={{ width: `${progressPct}%` }} /></div></div>
         <div className="tier-scroll">
@@ -808,8 +967,8 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
         <div className="content-nav"><button className="button ghost" onClick={() => activeIndex > 0 && setSelected(orderedNodes[activeIndex - 1].id)} disabled={activeIndex <= 0}><ArrowLeft size={16} />上一步</button><span>步骤 {Math.max(activeIndex + 1, 1)} / {orderedNodes.length}</span><button className="button dark" onClick={() => activeIndex > -1 && activeIndex < orderedNodes.length - 1 && setSelected(orderedNodes[activeIndex + 1].id)} disabled={activeIndex < 0 || activeIndex >= orderedNodes.length - 1}>继续：{orderedNodes[activeIndex + 1]?.title || '已到终点'} <ArrowRight size={16} /></button></div>
       </section>
 
-      <aside className="ai-column">
-        <div className="ai-head"><div><span className="ai-avatar"><Bot size={19} /></span><div><strong>AI 讲师</strong><small><span className="online-dot" />{isMainDialog ? `基于 ${course.materials.filter((item) => item.status === 'ready').length} 份课程材料` : '独立话题'}</small></div></div><div className="dialog-controls"><select aria-label="切换对话" value={activeDialogId} disabled={asking} onChange={(event) => switchDialog(event.target.value)}><option value="main">当前节点</option>{studyDialogs.map((dialog) => <option key={dialog.id} value={dialog.id}>{dialog.title}</option>)}</select><button type="button" disabled={asking} onClick={createDialog} title="开启新对话"><Plus size={14} /><span>新对话</span></button></div></div>
+      {!aiMinimized && <aside className="ai-column">
+        <div className="ai-head"><div><span className="ai-avatar"><Bot size={19} /></span><div><strong>AI 讲师</strong><small><span className="online-dot" />{isMainDialog ? `基于 ${course.materials.filter((item) => item.status === 'ready').length} 份课程材料` : '独立话题'}</small></div></div><div className="dialog-controls"><select aria-label="切换对话" value={activeDialogId} disabled={asking} onChange={(event) => switchDialog(event.target.value)}><option value="main">当前节点</option>{studyDialogs.map((dialog) => <option key={dialog.id} value={dialog.id}>{dialog.title}</option>)}</select><button type="button" disabled={asking} onClick={createDialog} title="开启新对话"><Plus size={14} /><span>新对话</span></button><div className="ai-head-actions"><button type="button" aria-label="AI 讲师更多选项" aria-expanded={aiMenuOpen} aria-haspopup="menu" className="icon-button tiny more-button" onClick={() => setAiMenuOpen((open) => !open)}><MoreHorizontal size={17} /></button>{aiMenuOpen && <div className="ai-action-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setAiMenuOpen(false); setAiMinimized(true) }}><PanelLeftClose size={14} />最小化</button></div>}</div></div></div>
         <div className="chat-scroll" ref={chatScrollRef}>
           {isMainDialog && <div className="ai-message teacher-intro">
             <p>我们一起学习 <strong>{currentTitle}</strong>。</p>
@@ -820,8 +979,9 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
           {asking && <div className="ai-message compact-message thinking-message"><span className="mini-spinner" /><p>正在结合当前节点判断是否需要扩展知识拓扑…</p></div>}
         </div>
         <div className="ask-box"><div className="quick-prompts"><button onClick={() => setChat(`换一个类比解释“${currentTitle}”`)}>换个类比</button><button onClick={() => setChat(`基于“${currentTitle}”给我一道变式题`)}>来道变式</button><button onClick={() => setChat(`学习“${currentTitle}”前需要补什么基础？`)}>探索前置知识</button></div><div className={`ask-input ${chatQuote ? 'has-selection' : ''}`}>{chatQuote && <div className="composer-selection"><div><p>{chatQuote}</p><span><MessageSquareText size={12} />Selection</span></div><button type="button" aria-label="移除引用" title="移除引用" onClick={() => setChatQuote(null)}><X size={14} /></button></div>}<div className="composer-entry"><textarea ref={askInputRef} value={chat} disabled={asking} onChange={(e) => setChat(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void ask() } }} placeholder={chatQuote ? '询问关于所选内容的问题…' : isMainDialog ? '针对当前节点追问；也可以选中文字直接问 AI…' : '输入这个独立话题的问题…'} /><button className="composer-send" onClick={() => void ask()} disabled={(!chat.trim() && !chatQuote) || asking}>{asking ? <RefreshCw className="spin-icon" size={16} /> : <ArrowRight size={18} />}</button></div></div><small>{isMainDialog ? '选中文字可引用提问；AI 会判断是否扩展拓扑' : '当前对话与节点问答分开保存'}</small></div>
-      </aside>
+      </aside>}
     </div>
+    {aiMinimized && <button type="button" className="ai-restore-button" aria-label="恢复 AI 讲师" title="恢复 AI 讲师" onClick={() => setAiMinimized(false)}><Bot size={22} /></button>}
   </div>
 }
 
