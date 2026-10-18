@@ -196,6 +196,7 @@ function PageHeader({ title, subtitle, actions }: { title: string; subtitle: str
 
 function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCourses: (courses: Course[]) => void; notify: (message: string) => void }) {
   const [showCreate, setShowCreate] = useState(false)
+  const [showAllCourses, setShowAllCourses] = useState(false)
   const [resumeTarget, setResumeTarget] = useState<ResumeTarget | null>(() => loadResumeTarget(courses))
   const [editingCourse, setEditingCourse] = useState<Course | null>(null)
   const [deletingCourse, setDeletingCourse] = useState<Course | null>(null)
@@ -265,7 +266,7 @@ function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCour
       </section>
 
       <section className="section-block">
-        <div className="section-heading"><div><h2>我的课程</h2><p>每门课都有独立的材料库与知识路径</p></div><button className="text-button">查看全部 <ArrowRight size={15} /></button></div>
+        <div className="section-heading"><div><h2>我的课程</h2><p>每门课都有独立的材料库与知识路径</p></div><button type="button" className="text-button" aria-haspopup="dialog" onClick={() => setShowAllCourses(true)}>查看全部 <ArrowRight size={15} /></button></div>
         <div className="course-grid">
           {courses.map((course) => <CourseCard
             key={course.id}
@@ -279,6 +280,7 @@ function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCour
         </div>
       </section>
 
+      {showAllCourses && <AllCoursesModal courses={courses} onClose={() => setShowAllCourses(false)} onCreate={() => { setShowAllCourses(false); setShowCreate(true) }} />}
       {showCreate && <CreateCourseModal onClose={() => setShowCreate(false)} onCreate={(course) => { setCourses([...courses, course]); setShowCreate(false); navigate(`/courses/${course.id}`); notify('课程已创建，可以导入材料了') }} />}
       {editingCourse && <EditCourseModal
         course={editingCourse}
@@ -341,6 +343,44 @@ function CourseCard({ course, menuOpen, onToggleMenu, onEdit, onDelete }: {
       </Link>
     </article>
   )
+}
+
+function AllCoursesModal({ courses, onClose, onCreate }: { courses: Course[]; onClose: () => void; onCreate: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const [search, setSearch] = useState('')
+  const query = search.trim().toLocaleLowerCase()
+  const filteredCourses = courses.filter((course) => [course.title, course.code, course.description, ...course.tags].join(' ').toLocaleLowerCase().includes(query))
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const previousOverflow = document.body.style.overflow
+    dialog?.showModal()
+    document.body.style.overflow = 'hidden'
+    return () => {
+      dialog?.close()
+      document.body.style.overflow = previousOverflow
+      if (previousFocus?.isConnected) previousFocus.focus()
+    }
+  }, [])
+
+  return <dialog ref={dialogRef} className="modal all-courses-modal" aria-labelledby="all-courses-title" onCancel={(event) => { event.preventDefault(); onClose() }} onClick={(event) => {
+    if (event.target !== event.currentTarget) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose()
+  }}>
+    <div className="modal-head"><div><span className="eyebrow">YOUR COURSE LIBRARY</span><h2 id="all-courses-title">全部课程</h2><p>共 {courses.length} 门课程 · 选择一门继续学习</p></div><button type="button" className="icon-button" aria-label="关闭全部课程" onClick={onClose}><X size={20} /></button></div>
+    <label className="all-courses-search"><Search size={18} aria-hidden="true" /><input autoFocus type="search" aria-label="搜索课程" placeholder="搜索课程名称、简介或标签…" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+    <div className="all-courses-results">
+      {filteredCourses.length ? <div className="all-courses-grid">{filteredCourses.map((course) => <Link className="all-courses-item" key={course.id} to={`/courses/${course.id}`} onClick={onClose}>
+        <div className="all-courses-item-head"><span className="course-swatch" style={{ background: course.accent }} /><span>{course.code}</span><ArrowRight size={18} /></div>
+        <h3>{course.title}</h3><p>{courseSubtitle(course)}</p>
+        <div className="tag-row">{course.tags.slice(0, 3).map((tag, index) => <span key={`${tag}-${index}`}>{formatConceptLabel(tag)}</span>)}</div>
+        <div className="all-courses-item-meta"><span><FileText size={14} />{course.materials.length} 份材料</span><span>最近学习 {course.updated}</span></div>
+      </Link>)}</div> : <div className="all-courses-empty"><Library size={32} /><h3>{courses.length ? '没有找到匹配的课程' : '还没有课程'}</h3><p>{courses.length ? '试试其他关键词，或清空搜索查看全部课程。' : '创建课程并上传资料，开始构建你的知识路径。'}</p>{query && <button type="button" className="button ghost" onClick={() => setSearch('')}>清空搜索</button>}</div>}
+    </div>
+    <div className="all-courses-footer"><span role="status">显示 {filteredCourses.length} / {courses.length} 门课程</span><button type="button" className="button primary" onClick={onCreate}><Plus size={17} />创建课程</button></div>
+  </dialog>
 }
 
 function CreateCourseModal({ onClose, onCreate }: { onClose: () => void; onCreate: (course: Course) => void }) {
