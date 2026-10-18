@@ -284,6 +284,32 @@ a { color: inherit; text-decoration: none; }
   .markdown-body h2 { font-size: 20px; }
 }
 
+/* ===== 小节（Section）层：列表卡片、构建、暂存 ===== */
+.section-grid { grid-template-columns: repeat(3, 1fr); }
+.section-card { min-height: 200px; display: flex; flex-direction: column; }
+.section-card h3 { margin: 16px 0 7px; font-size: 17px; }
+.section-card p { color: #858e9b; font-size: 11px; line-height: 1.6; margin: 0; flex: 1; }
+.section-status { font-size: 9px; font-weight: 700; letter-spacing: .03em; padding: 4px 9px; border-radius: 6px; }
+.section-status.ready { color: #bce883; background: #212c1a; }
+.section-status.building { color: #8fd0f5; background: #162936; }
+.section-status.failed { color: #ff9b82; background: #2e1b17; }
+.section-status.empty { color: #9aa4b0; background: #1b222a; }
+.section-go { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; background: #212c1a; color: var(--lime); }
+.build-actions { display: flex; align-items: center; gap: 9px; flex: 0 0 auto; }
+.empty-hint { margin-top: 14px; padding: 20px; border: 1px dashed #333c46; border-radius: 10px; color: #7c8692; font-size: 11px; text-align: center; line-height: 1.6; }
+.build-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 10px 0 2px; color: #93a187; font-size: 9px; }
+.build-meta span { display: flex; align-items: center; gap: 5px; }
+.build-meta svg { color: #a7c66c; flex: 0 0 auto; }
+.status.pending { color: #e4c36a; }
+.text-link.muted { color: #697480; }
+
+@media (max-width: 1180px) { .section-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 680px) {
+  .section-grid { grid-template-columns: 1fr; }
+  .build-actions { width: 100%; }
+  .build-actions .button { flex: 1; }
+}
+
 /* Markdown 深色变体：AI 讲师对话 / 检验题，与左侧浅色阅读面板统一但适配深色背景 */
 .markdown-body.on-dark { font-size: 11px; line-height: 1.75; color: #b5bdc7; }
 .markdown-body.on-dark h2 { font-size: 15px; color: #e7ecf2; border-bottom-color: #2a333d; margin: 4px 0 10px; }

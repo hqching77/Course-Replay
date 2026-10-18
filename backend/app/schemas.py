@@ -119,6 +119,11 @@ class VisualJobStatus(BaseModel):
     message: str
     error: str | None = None
     result: VisualProcessResponse | None = None
+    files_total: int = 0
+    files_done: int = 0
+    current_file: str | None = None
+    pages_total: int = 0
+    pages_done: int = 0
 
 
 class StudyAskRequest(BaseModel):

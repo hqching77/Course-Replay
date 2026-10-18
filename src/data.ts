@@ -1,4 +1,4 @@
-export type MaterialStatus = 'ready' | 'processing' | 'failed' | 'cancelled'
+export type MaterialStatus = 'pending' | 'ready' | 'processing' | 'failed' | 'cancelled'
 
 export interface CourseAnalysis {
   title: string
@@ -98,6 +98,12 @@ export interface ProcessingJob {
   progress: number
   stage: string
   message: string
+  filesTotal?: number
+  filesDone?: number
+  currentFile?: string
+  pagesTotal?: number
+  pagesDone?: number
+  startedAt?: number
 }
 
 export interface ExplorationNode {
@@ -126,22 +132,43 @@ export interface Material {
   pages?: number
 }
 
+export type SectionStatus = 'empty' | 'building' | 'ready' | 'failed'
+
+/**
+ * A 小节 (section): the unit a user actually builds and studies. Each section is
+ * fully isolated — its own files, analysis, knowledge map, chat and mastery — so
+ * sections never share or mix content.
+ */
+export interface Section {
+  id: string
+  title: string
+  createdAt: number
+  status: SectionStatus
+  materials: Material[]
+  analysis?: CourseAnalysis
+  analysisJobId?: string
+  knowledgeMap?: KnowledgeNode[]
+  processingJob?: ProcessingJob
+  explorationNodes?: ExplorationNode[]
+  chatHistory?: StudyMessage[]
+  mastery?: number
+}
+
 export interface Course {
   id: string
   title: string
   code: string
   description: string
   tags: string[]
+  /** Aggregate (average of sections) — display only. */
   mastery: number
-  materials: Material[]
   updated: string
   accent: string
-  analysis?: CourseAnalysis
-  analysisJobId?: string
-  processingJob?: ProcessingJob
-  explorationNodes?: ExplorationNode[]
-  chatHistory?: StudyMessage[]
-  knowledgeMap?: KnowledgeNode[]
+  sections: Section[]
+}
+
+export function createSection(title: string): Section {
+  return { id: `section-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, title: title.trim() || '新小节', createdAt: Date.now(), status: 'empty', materials: [] }
 }
 
 export const linuxKnowledgeMap: KnowledgeNode[] = [
@@ -442,6 +469,27 @@ tmux attach -t dev  # 重新接入
   },
 ]
 
+const linuxDemoAnalysis: CourseAnalysis = {
+  title: 'Linux 命令与 Shell 基础',
+  summary: '演示学习路径根据《补充材料 1：Linux基础》已解析的 26 页内容整理，覆盖路径与文件操作、Shell、用户权限、文本处理、脚本及 SSH。',
+  learning_path: [
+    '路径符号与 pwd、ls、cd',
+    '文件与目录操作：mkdir、touch、cp、mv',
+    'Shell、终端与命令执行',
+    '用户、用户组与文件权限',
+    'grep、重定向、管道与 Shell 脚本',
+    '环境变量、SSH 与 tmux',
+  ],
+  key_concepts: ['当前目录与相对路径', 'Shell 与终端的分工', '文件权限 rwx', '标准输入输出重定向', '管道与 grep', 'PATH 环境变量'],
+  review_questions: [
+    '执行 cd ..、cd ~、pwd 分别会带来什么目录变化？请结合相对路径与主目录解释。',
+    '为什么修改 hello.cpp 后需要再次运行 g++ src/hello.cpp -o bin/hello？',
+    'Terminal、CLI 和 Shell 分别负责什么？它们在执行一条命令时如何协作？',
+    'drwxr-xr-x 中的每一组字符分别表示谁的哪些权限？',
+    '比较 >、>> 与管道符 | 的作用及适用场景。',
+  ],
+}
+
 export const defaultCourses: Course[] = [
   {
     id: 'programming-linux',
@@ -452,30 +500,20 @@ export const defaultCourses: Course[] = [
     mastery: 42,
     updated: '刚刚导入',
     accent: '#7dd3fc',
-    knowledgeMap: linuxKnowledgeMap,
-    materials: [
-      { id: 'linux-supplement-1', name: '补充材料 1：Linux基础.pdf', meta: '26 页 · 2.2 MB · 已解析', type: 'PDF', status: 'ready' },
+    sections: [
+      {
+        id: 'linux-basics',
+        title: 'Linux 命令与 Shell 基础',
+        createdAt: 0,
+        status: 'ready',
+        mastery: 42,
+        knowledgeMap: linuxKnowledgeMap,
+        materials: [
+          { id: 'linux-supplement-1', name: '补充材料 1：Linux基础.pdf', meta: '26 页 · 2.2 MB · 已解析', type: 'PDF', status: 'ready', pages: 26 },
+        ],
+        analysis: linuxDemoAnalysis,
+      },
     ],
-    analysis: {
-      title: 'Linux 命令与 Shell 基础',
-      summary: '演示学习路径根据《补充材料 1：Linux基础》已解析的 26 页内容整理，覆盖路径与文件操作、Shell、用户权限、文本处理、脚本及 SSH。',
-      learning_path: [
-        '路径符号与 pwd、ls、cd',
-        '文件与目录操作：mkdir、touch、cp、mv',
-        'Shell、终端与命令执行',
-        '用户、用户组与文件权限',
-        'grep、重定向、管道与 Shell 脚本',
-        '环境变量、SSH 与 tmux',
-      ],
-      key_concepts: ['当前目录与相对路径', 'Shell 与终端的分工', '文件权限 rwx', '标准输入输出重定向', '管道与 grep', 'PATH 环境变量'],
-      review_questions: [
-        '执行 cd ..、cd ~、pwd 分别会带来什么目录变化？请结合相对路径与主目录解释。',
-        '为什么修改 hello.cpp 后需要再次运行 g++ src/hello.cpp -o bin/hello？',
-        'Terminal、CLI 和 Shell 分别负责什么？它们在执行一条命令时如何协作？',
-        'drwxr-xr-x 中的每一组字符分别表示谁的哪些权限？',
-        '比较 >、>> 与管道符 | 的作用及适用场景。',
-      ],
-    },
   },
 ]
 
@@ -490,17 +528,64 @@ export const knowledgeNodes = [
 const COURSES_KEY = 'course-replay-courses-linux-demo-v1'
 const MASTERY_KEY = 'course-replay-mastery-v1'
 
+type LegacyCourse = Course & {
+  materials?: Material[]
+  analysis?: CourseAnalysis
+  analysisJobId?: string
+  knowledgeMap?: KnowledgeNode[]
+  processingJob?: ProcessingJob
+  explorationNodes?: ExplorationNode[]
+  chatHistory?: StudyMessage[]
+}
+
+/** Wrap a pre-section (course-level materials/analysis) course into one section. */
+function migrateCourse(raw: LegacyCourse): Course {
+  if (Array.isArray(raw.sections)) {
+    // Already section-shaped. Keep the demo course's authored map fresh.
+    if (raw.id === 'programming-linux' && raw.sections[0]) {
+      raw.sections[0] = { ...raw.sections[0], knowledgeMap: linuxKnowledgeMap }
+    }
+    return raw
+  }
+  const section: Section = {
+    id: `${raw.id}-s1`,
+    title: raw.analysis?.title || '第 1 小节',
+    createdAt: Date.now(),
+    status: raw.analysis ? 'ready' : (raw.materials?.length ? 'ready' : 'empty'),
+    materials: raw.materials || [],
+    analysis: raw.analysis,
+    analysisJobId: raw.analysisJobId,
+    knowledgeMap: raw.id === 'programming-linux' ? linuxKnowledgeMap : raw.knowledgeMap,
+    processingJob: raw.processingJob,
+    explorationNodes: raw.explorationNodes,
+    chatHistory: raw.chatHistory,
+    mastery: raw.mastery,
+  }
+  return {
+    id: raw.id,
+    title: raw.title,
+    code: raw.code,
+    description: raw.description,
+    tags: raw.tags || [],
+    mastery: raw.mastery || 0,
+    updated: raw.updated || '',
+    accent: raw.accent || '#c7f45d',
+    sections: [section],
+  }
+}
+
+export function courseMastery(course: Course): number {
+  const scored = course.sections.filter((section) => typeof section.mastery === 'number')
+  if (!scored.length) return course.mastery || 0
+  return Math.round(scored.reduce((sum, section) => sum + (section.mastery || 0), 0) / scored.length)
+}
+
 export function loadCourses(): Course[] {
   try {
     const stored = localStorage.getItem(COURSES_KEY)
     if (!stored) return defaultCourses
-    const parsed = JSON.parse(stored) as Course[]
-    // Backfill demo knowledge maps from defaults so existing sessions
-    // pick up newly authored content without losing chat / exploration.
-    return parsed.map((course) => {
-      const base = defaultCourses.find((item) => item.id === course.id)
-      return base?.knowledgeMap ? { ...course, knowledgeMap: base.knowledgeMap } : course
-    })
+    const parsed = JSON.parse(stored) as LegacyCourse[]
+    return parsed.map(migrateCourse)
   } catch {
     return defaultCourses
   }
@@ -510,11 +595,22 @@ export function saveCourses(courses: Course[]) {
   localStorage.setItem(COURSES_KEY, JSON.stringify(courses))
 }
 
-export function loadMastery() {
-  const value = Number(localStorage.getItem(MASTERY_KEY))
-  return Number.isFinite(value) && value > 0 ? value : 62
+export function loadMastery(sectionId: string, fallback = 0): number {
+  try {
+    const map = JSON.parse(localStorage.getItem(MASTERY_KEY) || '{}') as Record<string, number>
+    const value = Number(map[sectionId])
+    return Number.isFinite(value) && value > 0 ? value : fallback
+  } catch {
+    return fallback
+  }
 }
 
-export function saveMastery(value: number) {
-  localStorage.setItem(MASTERY_KEY, String(value))
+export function saveMastery(sectionId: string, value: number) {
+  try {
+    const map = JSON.parse(localStorage.getItem(MASTERY_KEY) || '{}') as Record<string, number>
+    map[sectionId] = value
+    localStorage.setItem(MASTERY_KEY, JSON.stringify(map))
+  } catch {
+    // ignore storage failures (private mode, etc.)
+  }
 }
