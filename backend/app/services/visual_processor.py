@@ -31,6 +31,7 @@ class PreparedVisualDocument:
     pages: int
     processing: str
     content_parts: list[dict[str, Any]]
+    preview_path: Path
 
 
 def find_libreoffice() -> str | None:
@@ -132,7 +133,7 @@ def _render_pdf(pdf_path: Path, source_name: str, settings: Settings) -> list[di
         parts: list[dict[str, Any]] = []
         for index, page in enumerate(document):
             pixmap = page.get_pixmap(matrix=matrix, alpha=False)
-            image_bytes = pixmap.tobytes(output="jpeg", jpg_quality=82)
+            image_bytes = pixmap.tobytes(output="jpeg", jpg_quality=72)
             encoded = base64.b64encode(image_bytes).decode("ascii")
             parts.extend([
                 {"type": "text", "text": f"下面是《{source_name}》第 {index + 1} / {len(document)} 页："},
@@ -167,6 +168,7 @@ def prepare_visual_document(
                 {"type": "text", "text": f"下面是课堂材料图片《{original_name}》："},
                 {"type": "image_url", "image_url": {"url": _as_data_url(source, media_type), "detail": "high"}},
             ],
+            preview_path=source,
         )
 
     if extension in TEXT_EXTENSIONS:
@@ -177,6 +179,7 @@ def prepare_visual_document(
             pages=1,
             processing="原始文本输入",
             content_parts=[{"type": "text", "text": f"《{original_name}》全文：\n\n{content}"}],
+            preview_path=source,
         )
 
     pdf_path = source
@@ -192,4 +195,5 @@ def prepare_visual_document(
         pages=sum(1 for part in parts if part["type"] == "image_url"),
         processing=processing,
         content_parts=parts,
+        preview_path=pdf_path,
     )

@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     artifacts_dir: Path = Path("./data/artifacts")
     max_upload_mb: int = 100
     max_pages_per_file: int = 40
-    document_render_dpi: int = 144
+    document_render_dpi: int = 110
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     openai_api_key: str = ""

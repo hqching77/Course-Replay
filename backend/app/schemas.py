@@ -86,6 +86,7 @@ class VisualDocumentInfo(BaseModel):
     media_type: str
     pages: int = 1
     processing: str
+    preview_url: str
 
 
 class CourseMaterialAnalysis(BaseModel):
@@ -103,3 +104,18 @@ class VisualProcessResponse(BaseModel):
     model: str
     provider: str = "CheapRouter"
     usage: dict[str, Any] | None = None
+
+
+class VisualJobStartResponse(BaseModel):
+    job_id: str
+    status: str = "queued"
+
+
+class VisualJobStatus(BaseModel):
+    job_id: str
+    status: str
+    stage: str
+    progress: int
+    message: str
+    error: str | None = None
+    result: VisualProcessResponse | None = None

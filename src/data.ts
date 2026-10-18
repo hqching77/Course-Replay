@@ -1,4 +1,12 @@
-export type MaterialStatus = 'ready' | 'processing' | 'failed'
+export type MaterialStatus = 'ready' | 'processing' | 'failed' | 'cancelled'
+
+export interface CourseAnalysis {
+  title: string
+  summary: string
+  learning_path: string[]
+  key_concepts: string[]
+  review_questions: string[]
+}
 
 export interface Material {
   id: string
@@ -8,6 +16,8 @@ export interface Material {
   status: MaterialStatus
   progress?: number
   error?: string
+  previewUrl?: string
+  pages?: number
 }
 
 export interface Course {
@@ -20,6 +30,8 @@ export interface Course {
   materials: Material[]
   updated: string
   accent: string
+  analysis?: CourseAnalysis
+  analysisJobId?: string
 }
 
 export const defaultCourses: Course[] = [
