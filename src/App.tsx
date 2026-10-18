@@ -447,7 +447,7 @@ function SectionDetail({ courses, setCourses, notify }: { courses: Course[]; set
               status: 'ready',
               analysis: payload.analysis,
               analysisJobId: jobId,
-              knowledgeMap: payload.analysis.knowledge_map?.length ? payload.analysis.knowledge_map : undefined,
+              knowledgeMap: undefined,
               materials: current.materials.map((material) => {
                 if (!materialIds.includes(material.id)) return material
                 const materialIndex = materialIds.indexOf(material.id)
@@ -641,6 +641,9 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
   const course = courses.find((item) => item.id === courseId)
   const section = course?.sections.find((item) => item.id === sectionId)
   const [selected, setSelected] = useState('')
+  const [topologyExpanded, setTopologyExpanded] = useState(false)
+  const [topologyLoading, setTopologyLoading] = useState(false)
+  const [topologyError, setTopologyError] = useState('')
   const [answer, setAnswer] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState(false)
   const [mastery, setMastery] = useState(() => loadMastery(sectionId, section?.mastery ?? 0))
@@ -743,7 +746,7 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
     <div className="replay-topbar"><Link to={`/courses/${course.id}/sections/${section.id}`}><ArrowLeft size={16} />{section.title}</Link><div className="replay-location"><span>{course.title}</span><ChevronRight size={14} /><strong>{currentTitle}</strong></div><div className="replay-actions"><span className="saved"><Check size={14} />分析与进度已保存</span><button className="icon-button"><PanelLeftClose size={18} /></button></div></div>
     <div className="replay-grid">
       <aside className="path-column">
-        <div className="path-head"><span className="eyebrow">LIVE KNOWLEDGE MAP</span><h2>课程知识拓扑</h2><div><span>{kmNodes.length} 个知识节点</span><span>{explorationNodes.length} 条探索支线</span></div><div className="thin-progress"><span style={{ width: `${progressPct}%` }} /></div></div>
+        <div className="path-head"><span className="eyebrow">LIVE KNOWLEDGE MAP</span><h2>课程知识拓扑</h2><button className="topology-expand" aria-expanded={topologyExpanded} aria-controls="knowledge-workspace" onClick={() => setTopologyExpanded(true)}><Network size={13} />拓扑图展开</button><div><span>{kmNodes.length} 个知识节点</span><span>{explorationNodes.length} 条探索支线</span></div><div className="thin-progress"><span style={{ width: `${progressPct}%` }} /></div></div>
         <div className="tier-scroll">
           {grouped.map((group) => <section className={`tier-group tier-${group.tier}`} key={group.tier}>
             <header className="tier-label"><span className="tier-dot" /><div><small>{TIER_META[group.tier].eyebrow}</small><strong>{TIER_META[group.tier].label}</strong></div><span className="tier-count">{group.nodes.length}</span></header>
@@ -767,13 +770,22 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
         <div className="path-tip"><Lightbulb size={16} /><p>内容按「前置 → 核心 → 进阶」分层。点击节点切换学习焦点，向 AI 提问会自动长出探索支线。</p></div>
       </aside>
 
-      <section className="content-column">
-        <div className="content-toolbar"><div><span className={`tier-badge tier-${activeTier || 'branch'}`}>{tierLabel}</span><strong>{currentTitle}</strong></div><span>{section.materials[0]?.name || (section.analysis ? '已完成构建' : '等待构建')}</span></div>
+      <section className="content-column" id="knowledge-workspace">
+        <div className="content-toolbar"><div><span className={`tier-badge tier-${activeTier || 'branch'}`}>{topologyExpanded ? '思维导图' : tierLabel}</span><strong>{currentTitle}</strong></div>{topologyExpanded ? <button className="topology-close" aria-label="关闭拓扑图，返回核心知识点页面" onClick={() => setTopologyExpanded(false)}><X size={16} />关闭</button> : <span>{section.materials[0]?.name || (section.analysis ? '已完成构建' : '等待构建')}</span>}</div>
         <div className="reading-stage">
-          <article className="reading-paper">
+          {topologyExpanded ? <><div className="graph-actions"><span>{topologyLoading ? 'AI 正在分析知识依赖…' : topologyError || '拖拽空白处平移 · 滚轮缩放 · 点击节点查看正文'}</span><button className="topology-close" disabled={topologyLoading} onClick={async () => {
+            setTopologyLoading(true); setTopologyError('')
+            try {
+              const response = await fetch('/api/study/topology', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nodes: kmNodes.map(({ id, title, tier, content }) => ({ id, title, tier, content })), summary: section.analysis?.summary || '' }) })
+              const data = await response.json()
+              if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : '关系生成失败，请重试')
+              updateSection(setCourses, course.id, section.id, (current) => ({ ...current, topology: { signature: JSON.stringify(kmNodes), edges: data.edges } }))
+            } catch (error) { setTopologyError(error instanceof Error ? error.message : '关系生成失败') }
+            finally { setTopologyLoading(false) }
+          }}>{topologyLoading ? '生成中…' : 'AI 生成关系'}</button></div><KnowledgeGraph nodes={kmNodes} edges={section.topology?.signature === JSON.stringify(kmNodes) ? section.topology.edges : []} branches={explorationNodes} selected={selected} onSelect={(id) => { setSelected(id); setTopologyExpanded(false) }} />{(!section.topology || section.topology.signature !== JSON.stringify(kmNodes)) && <p className="graph-note">点击「AI 生成关系」分析当前材料的前置依赖，不按排列顺序自动连线。连线箭头指向后续知识点，悬停可查看 AI 判断依据。</p>}</> : <article className="reading-paper">
             <div className="reading-index"><span>{String(Math.max(activeIndex, 0) + 1).padStart(2, '0')}</span><em>{tierEyebrow} · 学习路径</em></div>
             <Markdown>{activeContent}</Markdown>
-          </article>
+          </article>}
         </div>
         <div className="source-strip"><LinkIcon size={15} /><span>材料依据</span>{section.materials.length ? section.materials.map((material) => <button key={material.id} onClick={() => notify(`材料：${material.name}`)}>{material.name}</button>) : <button onClick={() => notify('请先返回小节上传并完成构建')}>暂无关联材料</button>}</div>
         <div className="content-nav"><button className="button ghost" onClick={() => activeIndex > 0 && setSelected(orderedNodes[activeIndex - 1].id)} disabled={activeIndex <= 0}><ArrowLeft size={16} />上一步</button><span>步骤 {Math.max(activeIndex + 1, 1)} / {orderedNodes.length}</span><button className="button dark" onClick={() => activeIndex > -1 && activeIndex < orderedNodes.length - 1 && setSelected(orderedNodes[activeIndex + 1].id)} disabled={activeIndex < 0 || activeIndex >= orderedNodes.length - 1}>继续：{orderedNodes[activeIndex + 1]?.title || '已到终点'} <ArrowRight size={16} /></button></div>
@@ -797,6 +809,53 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
 }
 
 function GitBranchIcon() { return <Network size={14} /> }
+
+function KnowledgeGraph({ nodes, edges, branches, selected, onSelect }: { nodes: KnowledgeNode[]; edges: { source: string; target: string; reason: string }[]; branches: { id: string; title: string; parentId: string }[]; selected: string; onSelect: (id: string) => void }) {
+  const [view, setView] = useState({ x: 30, y: 30, scale: 1 })
+  const drag = useRef<{ x: number; y: number; originX: number; originY: number } | null>(null)
+  const graph = useMemo(() => {
+    const depths = new Map(nodes.map((node) => [node.id, 0]))
+    for (let pass = 0; pass < nodes.length; pass++) {
+      let changed = false
+      for (const edge of edges) {
+        if (!depths.has(edge.source) || !depths.has(edge.target)) continue
+        const next = Math.min(nodes.length, depths.get(edge.source)! + 1)
+        if (next > depths.get(edge.target)!) { depths.set(edge.target, next); changed = true }
+      }
+      if (!changed) break
+    }
+    const rows = new Map<number, number>()
+    const positioned = nodes.map((node) => {
+      const depth = depths.get(node.id) || 0
+      const row = rows.get(depth) || 0; rows.set(depth, row + 1)
+      return { ...node, x: depth * 310, y: row * 145 }
+    })
+    for (const branch of branches) {
+      const parent = positioned.find((node) => node.id === branch.parentId)
+      if (!parent) continue
+      const depth = Math.round(parent.x / 310) + 1
+      const row = rows.get(depth) || 0; rows.set(depth, row + 1)
+      positioned.push({ id: branch.id, title: branch.title, tier: parent.tier, summary: '问答探索支线', content: '', x: depth * 310, y: row * 145 })
+    }
+    return positioned
+  }, [nodes, edges, branches])
+  const allEdges = [...edges, ...branches.map((branch) => ({ source: branch.parentId, target: branch.id, reason: '问答探索' }))]
+  return <div className="graph-viewport" aria-label="课程知识依赖拓扑图" onWheel={(event) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    const px = event.clientX - rect.left, py = event.clientY - rect.top
+    setView((old) => { const scale = Math.max(.25, Math.min(2, old.scale * (event.deltaY > 0 ? .9 : 1.1))); return { scale, x: px - (px - old.x) * scale / old.scale, y: py - (py - old.y) * scale / old.scale } })
+  }} onPointerDown={(event) => {
+    if ((event.target as HTMLElement).closest('button')) return
+    event.currentTarget.setPointerCapture(event.pointerId)
+    drag.current = { x: event.clientX, y: event.clientY, originX: view.x, originY: view.y }
+  }} onPointerMove={(event) => { if (drag.current) { const d = drag.current; setView((old) => ({ ...old, x: d.originX + event.clientX - d.x, y: d.originY + event.clientY - d.y })) } }} onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }}>
+    <div className="graph-controls"><button onClick={() => setView({ x: 30, y: 30, scale: 1 })}>复位</button><button aria-label="缩小" onClick={() => setView((v) => ({ ...v, scale: Math.max(.25, v.scale / 1.2) }))}>−</button><span>{Math.round(view.scale * 100)}%</span><button aria-label="放大" onClick={() => setView((v) => ({ ...v, scale: Math.min(2, v.scale * 1.2) }))}>+</button></div>
+    <div className="graph-world" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
+      <svg className="graph-edges" width={Math.max(800, ...graph.map((n) => n.x + 300))} height={Math.max(600, ...graph.map((n) => n.y + 150))}><defs><marker id="dependency-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#7dd3fc" /></marker></defs>{allEdges.map((edge, index) => { const source = graph.find((n) => n.id === edge.source), target = graph.find((n) => n.id === edge.target); if (!source || !target) return null; return <path key={index} d={`M ${source.x + 230} ${source.y + 45} C ${source.x + 270} ${source.y + 45}, ${target.x - 40} ${target.y + 45}, ${target.x} ${target.y + 45}`} stroke="#7dd3fc" strokeWidth="1.5" fill="none" markerEnd="url(#dependency-arrow)"><title>{edge.reason}</title></path> })}</svg>
+      {graph.map((node) => <button key={node.id} className={`graph-node tier-${node.tier} ${selected === node.id ? 'active' : ''}`} style={{ left: node.x, top: node.y }} onClick={() => onSelect(node.id)}><small>{TIER_META[node.tier].label}</small><strong>{node.title}</strong><span>{node.summary}</span></button>)}
+    </div>
+  </div>
+}
 
 function Review({ courses, notify }: { courses: Course[]; notify: (message: string) => void }) {
   const { course, section } = useSection(courses)
