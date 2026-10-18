@@ -97,13 +97,23 @@ class CourseSection(BaseModel):
     source_page: int = Field(default=1, ge=1)
 
 
+class AnalysisKnowledgeNode(BaseModel):
+    id: str = ""
+    title: str = ""
+    tier: str = "core"  # prereq | core | advanced
+    summary: str = ""
+    content: str = ""  # instructor-style Markdown (GFM + LaTeX)
+
+
 class CourseMaterialAnalysis(BaseModel):
     title: str = "课堂材料分析"
     summary: str
     learning_path: list[str] = Field(default_factory=list)
     key_concepts: list[str] = Field(default_factory=list)
     review_questions: list[str] = Field(default_factory=list)
+    # dev's section-based content (kept for compatibility) + this branch's tiered map
     sections: list[CourseSection] = Field(default_factory=list)
+    knowledge_map: list[AnalysisKnowledgeNode] = Field(default_factory=list)
     raw: str | None = None
 
 
@@ -128,6 +138,11 @@ class VisualJobStatus(BaseModel):
     message: str
     error: str | None = None
     result: VisualProcessResponse | None = None
+    files_total: int = 0
+    files_done: int = 0
+    current_file: str | None = None
+    pages_total: int = 0
+    pages_done: int = 0
 
 
 class StudyAskRequest(BaseModel):

@@ -2,6 +2,7 @@ import { Dispatch, FormEvent, ReactNode, SetStateAction, useEffect, useMemo, use
 import {
   ArrowLeft,
   ArrowRight,
+  BarChart3,
   BookOpen,
   Bot,
   BrainCircuit,
@@ -20,14 +21,15 @@ import {
   Library,
   Lightbulb,
   Link as LinkIcon,
+  ListChecks,
   MessageSquareText,
   MoreHorizontal,
   Network,
   PanelLeftClose,
-  Pencil,
   Plus,
   RefreshCw,
   Search,
+  Send,
   Settings,
   Sparkles,
   Target,
@@ -36,40 +38,36 @@ import {
   X,
   Zap,
 } from 'lucide-react'
-import { Link, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
-import { Course, CourseAnalysis, KnowledgeNode, KnowledgeTier, TIER_META, deriveKnowledgeMap, knowledgeNodes, loadCourses, loadMastery, saveCourses } from './data'
+import { Course, CourseAnalysis, KnowledgeNode, KnowledgeTier, Material, Section, TIER_META, courseMastery, createSection, deriveKnowledgeMap, knowledgeNodes, loadCourses, loadMastery, normalizeMarkdown, saveCourses, saveMastery } from './data'
+
+/** Update a single section inside the courses array immutably. */
+function updateSection(setCourses: Dispatch<SetStateAction<Course[]>>, courseId: string, sectionId: string, updater: (section: Section) => Section) {
+  setCourses((current) => current.map((course) => course.id === courseId ? {
+    ...course,
+    sections: course.sections.map((section) => section.id === sectionId ? updater(section) : section),
+  } : course))
+}
 
 const MARKDOWN_PLUGINS = { remarkPlugins: [remarkGfm, remarkMath], rehypePlugins: [rehypeKatex] }
 const TIER_ORDER: KnowledgeTier[] = ['prereq', 'core', 'advanced']
 
-function Markdown({ children }: { children: string }) {
-  return <div className="markdown-body"><ReactMarkdown remarkPlugins={MARKDOWN_PLUGINS.remarkPlugins} rehypePlugins={MARKDOWN_PLUGINS.rehypePlugins}>{children}</ReactMarkdown></div>
+function Markdown({ children, className }: { children: string; className?: string }) {
+  return (
+    <div className={className ? `markdown-body ${className}` : 'markdown-body'}>
+      <ReactMarkdown remarkPlugins={MARKDOWN_PLUGINS.remarkPlugins} rehypePlugins={MARKDOWN_PLUGINS.rehypePlugins}>
+        {children}
+      </ReactMarkdown>
+    </div>
+  )
 }
 
 type Notice = { id: number; message: string }
-type ResumeTarget = { courseId: string; destination: 'replay' }
-
-const LAST_STUDY_KEY = 'course-replay-last-study'
-const DISMISSED_STUDY_KEY = 'course-replay-dismissed-study'
-const LEGACY_DISMISSED_KEY = 'course-replay-resume-card-dismissed'
-
-function loadResumeTarget(courses: Course[]): ResumeTarget | null {
-  try {
-    const stored = localStorage.getItem(LAST_STUDY_KEY)
-    const target: ResumeTarget = stored ? JSON.parse(stored) : { courseId: courses.find((course) => course.id === 'programming-linux')?.id || courses[0]?.id || '', destination: 'replay' }
-    if (!courses.some((course) => course.id === target.courseId)) return null
-    if (localStorage.getItem(DISMISSED_STUDY_KEY) === `${target.courseId}:${target.destination}`) return null
-    if (!stored && localStorage.getItem(LEGACY_DISMISSED_KEY) === 'true') return null
-    return { courseId: target.courseId, destination: 'replay' }
-  } catch {
-    return null
-  }
-}
 
 function trimText(value: string, limit: number) {
   const clean = value.replace(/\s+/g, ' ').trim()
@@ -87,46 +85,46 @@ function formatLearningStep(value: string) {
   }
 }
 
+function formatDuration(totalSeconds: number) {
+  const s = Math.max(0, Math.round(totalSeconds))
+  const minutes = Math.floor(s / 60)
+  const seconds = s % 60
+  return minutes > 0 ? `${minutes} 分 ${String(seconds).padStart(2, '0')} 秒` : `${seconds} 秒`
+}
+
+function rotateList(list: string[], start: number, count: number) {
+  if (!list.length) return []
+  const from = ((start % list.length) + list.length) % list.length
+  return Array.from({ length: Math.min(count, list.length) }, (_, offset) => list[(from + offset) % list.length])
+}
 function formatConceptLabel(value: string) {
   const clean = value.replace(/^\s*(?:\d+[.、)）:]|[-*•])\s*/, '').trim()
   return trimText(clean.split(/[：:。；;]/)[0] || clean, 18)
 }
 
+function courseStats(course: Course) {
+  const materials = course.sections.reduce((sum, section) => sum + section.materials.length, 0)
+  const stages = course.sections.reduce((sum, section) => sum + (section.knowledgeMap?.length || section.analysis?.learning_path.length || 0), 0)
+  return { sections: course.sections.length, materials, stages }
+}
+
 function courseSubtitle(course: Course) {
   const description = course.description.trim()
-  const analysisWasCopiedIntoDescription = Boolean(course.analysis && description === course.analysis.summary.trim())
-  if (analysisWasCopiedIntoDescription || description.length > 180) {
-    const readyCount = course.materials.filter((material) => material.status === 'ready').length
-    return `已整理 ${readyCount} 份课程材料 · ${course.analysis?.learning_path.length || 0} 个学习阶段 · 随时开始重放`
-  }
-  return description
+  if (description && description.length <= 180) return description
+  const { sections, materials } = courseStats(course)
+  return `${sections} 个小节 · ${materials} 份材料 · 随时开始学习`
+}
+
+/** First section id for a course, for "continue learning" style shortcuts. */
+function firstSectionId(course: Course | undefined) {
+  return course?.sections[0]?.id
 }
 
 function App() {
   const [courses, setCourses] = useState<Course[]>(loadCourses)
   const [notices, setNotices] = useState<Notice[]>([])
-  const location = useLocation()
 
   useEffect(() => saveCourses(courses), [courses])
-
-  useEffect(() => {
-    const match = location.pathname.match(/^\/courses\/([^/]+)(?:\/(replay))?\/?$/)
-    if (!match) return
-    let courseId: string
-    try {
-      courseId = decodeURIComponent(match[1])
-    } catch {
-      return
-    }
-    const target: ResumeTarget = { courseId, destination: 'replay' }
-    try {
-      localStorage.setItem(LAST_STUDY_KEY, JSON.stringify(target))
-      localStorage.removeItem(DISMISSED_STUDY_KEY)
-      localStorage.removeItem(LEGACY_DISMISSED_KEY)
-    } catch {
-      return
-    }
-  }, [location.pathname])
 
   const notify = (message: string) => {
     const id = Date.now()
@@ -136,12 +134,18 @@ function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar courses={courses} />
+      <Sidebar />
       <main className="main-shell">
         <Routes>
           <Route path="/" element={<Dashboard courses={courses} setCourses={setCourses} notify={notify} />} />
-          <Route path="/courses/:courseId" element={<CourseDetail courses={courses} setCourses={setCourses} notify={notify} />} />
-          <Route path="/courses/:courseId/replay" element={<Replay courses={courses} setCourses={setCourses} notify={notify} />} />
+          <Route path="/courses/:courseId" element={<CourseSections courses={courses} setCourses={setCourses} notify={notify} />} />
+          <Route path="/courses/:courseId/sections/:sectionId" element={<SectionDetail courses={courses} setCourses={setCourses} notify={notify} />} />
+          <Route path="/courses/:courseId/sections/:sectionId/replay" element={<Replay courses={courses} setCourses={setCourses} notify={notify} />} />
+          <Route path="/courses/:courseId/sections/:sectionId/review" element={<Review courses={courses} notify={notify} />} />
+          <Route path="/courses/:courseId/sections/:sectionId/progress" element={<Progress courses={courses} />} />
+          <Route path="/courses/:courseId/replay" element={<LegacySectionRedirect courses={courses} suffix="replay" />} />
+          <Route path="/courses/:courseId/review" element={<LegacySectionRedirect courses={courses} suffix="review" />} />
+          <Route path="/courses/:courseId/progress" element={<LegacySectionRedirect courses={courses} suffix="progress" />} />
           <Route path="/settings" element={<SettingsPage notify={notify} />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
@@ -155,10 +159,11 @@ function App() {
   )
 }
 
-function Sidebar({ courses }: { courses: Course[] }) {
+function Sidebar() {
   const location = useLocation()
-  const courseMatch = location.pathname.match(/\/courses\/([^/]+)/)
-  const courseId = courseMatch?.[1] || loadResumeTarget(courses)?.courseId || courses[0]?.id || ''
+  const courseId = location.pathname.match(/\/courses\/([^/]+)/)?.[1] || 'programming-linux'
+  const sectionId = location.pathname.match(/\/sections\/([^/]+)/)?.[1]
+  const base = sectionId ? `/courses/${courseId}/sections/${sectionId}` : `/courses/${courseId}`
   return (
     <aside className="sidebar">
       <Link className="brand" to="/" aria-label="Course Replay 首页">
@@ -167,14 +172,22 @@ function Sidebar({ courses }: { courses: Course[] }) {
       </Link>
       <nav className="nav-main">
         <NavItem to="/" end icon={<LayoutDashboard size={18} />} label="课程空间" />
-        <NavItem to={`/courses/${courseId}/replay`} icon={<BrainCircuit size={18} />} label="课堂重放" />
+        <NavItem to={sectionId ? `${base}/replay` : `/courses/${courseId}`} icon={<BrainCircuit size={18} />} label="课堂重放" />
+        <NavItem to={sectionId ? `${base}/review` : `/courses/${courseId}`} icon={<ListChecks size={18} />} label="复习工坊" />
+        <NavItem to={sectionId ? `${base}/progress` : `/courses/${courseId}`} icon={<BarChart3 size={18} />} label="我的学习" />
       </nav>
+      <div className="sidebar-label">当前学期</div>
+      <div className="semester-card">
+        <div className="semester-row"><span>2026 秋</span><ChevronDown size={15} /></div>
+        <div className="semester-progress"><span style={{ width: '58%' }} /></div>
+        <small>第 8 周 · 共 16 周</small>
+      </div>
       <div className="sidebar-bottom">
         <NavItem to="/settings" icon={<Settings size={18} />} label="AI 与偏好设置" />
         <div className="profile">
           <div className="avatar">CY</div>
           <div><strong>学习者</strong><span>连续学习 7 天</span></div>
-          <button type="button" className="icon-button tiny more-button" aria-label="更多选项"><MoreHorizontal size={17} /></button>
+          <MoreHorizontal size={17} />
         </div>
       </div>
     </aside>
@@ -196,66 +209,35 @@ function PageHeader({ title, subtitle, actions }: { title: string; subtitle: str
 
 function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCourses: (courses: Course[]) => void; notify: (message: string) => void }) {
   const [showCreate, setShowCreate] = useState(false)
-  const [showAllCourses, setShowAllCourses] = useState(false)
-  const [resumeTarget, setResumeTarget] = useState<ResumeTarget | null>(() => loadResumeTarget(courses))
-  const [editingCourse, setEditingCourse] = useState<Course | null>(null)
-  const [deletingCourse, setDeletingCourse] = useState<Course | null>(null)
-  const [openCourseMenuId, setOpenCourseMenuId] = useState<string | null>(null)
   const navigate = useNavigate()
-  const resumeCourse = resumeTarget ? courses.find((course) => course.id === resumeTarget.courseId) : null
-  const avg = Math.round(courses.reduce((sum, item) => sum + item.mastery, 0) / Math.max(courses.length, 1))
-  const openCreateModal = () => setShowCreate(true)
-  const dismissResume = () => {
-    setResumeTarget(null)
-    try {
-      if (resumeTarget) localStorage.setItem(DISMISSED_STUDY_KEY, `${resumeTarget.courseId}:${resumeTarget.destination}`)
-    } catch {
-      notify('已关闭继续学习卡片，但浏览器无法保存此设置，刷新后可能会恢复。')
-    }
-  }
+  const avg = Math.round(courses.reduce((sum, item) => sum + courseMastery(item), 0) / Math.max(courses.length, 1))
+  const lead = courses[0]
+  const leadReplay = lead && firstSectionId(lead) ? `/courses/${lead.id}/sections/${firstSectionId(lead)}/replay` : lead ? `/courses/${lead.id}` : '/'
   return (
     <div className="page dashboard-page">
       <PageHeader
         title="下午好，准备继续吗？"
-        subtitle="把散落的课件和笔记，重新串成一条能真正掌握的学习路径。"
-        actions={<><button className="icon-button" aria-label="搜索"><Search size={19} /></button><button className="button primary" onClick={() => openCreateModal()}><Plus size={18} />创建课程</button></>}
+        subtitle="把散落的课件与笔记，重新串成一条能真正掌握的学习路径。"
+        actions={<><button className="icon-button" aria-label="搜索"><Search size={19} /></button><button className="button primary" onClick={() => setShowCreate(true)}><Plus size={18} />创建课程</button></>}
       />
 
       <section className="hero-card">
-        {resumeCourse && resumeTarget ? <>
-          <div className="hero-copy">
-            <span className="pill lime"><Zap size={13} />继续上次学习</span>
-            <h2>{resumeCourse.analysis?.title || resumeCourse.title}</h2>
-            <p>{resumeCourse.title} · 继续学习</p>
-            <div className="hero-progress-row"><span>课程进度</span><strong>3 / 5</strong></div>
-            <div className="hero-progress"><span style={{ width: '58%' }} /></div>
-            <div className="hero-actions">
-              <Link className="button light" to={`/courses/${resumeCourse.id}/${resumeTarget.destination}`}>继续课堂重放 <ArrowRight size={17} /></Link>
-              <button className="button ghost hero-dismiss" onClick={dismissResume}><X size={16} />取消</button>
-            </div>
-          </div>
-          <div className="hero-visual" aria-hidden="true">
-            <div className="orbit orbit-one" /><div className="orbit orbit-two" />
-            <div className="hero-node main-node"><BrainCircuit size={29} /><span>化简</span></div>
-            <div className="hero-node node-a">A · B</div>
-            <div className="hero-node node-b">A + B</div>
-            <div className="hero-node node-c">K-map</div>
-            <span className="connector connector-a" /><span className="connector connector-b" /><span className="connector connector-c" />
-          </div>
-        </> : <>
-          <div className="hero-copy hero-create-copy">
-            <span className="pill lime"><UploadCloud size={13} />开启新的学习</span>
-            <h2>创建课程并上传资料</h2>
-            <p>导入课件和笔记，为课程搭建专属学习路径。</p>
-            <button className="button light" onClick={openCreateModal}>创建课程并上传资料 <ArrowRight size={17} /></button>
-          </div>
-          <div className="hero-visual hero-upload-visual" aria-hidden="true">
-            <div className="orbit orbit-one" /><div className="orbit orbit-two" />
-            <div className="upload-center"><UploadCloud size={30} /><span>上传资料</span></div>
-            <div className="upload-file upload-file-a"><FileText size={15} />课堂课件</div>
-            <div className="upload-file upload-file-b"><FileText size={15} />学习笔记</div>
-          </div>
-        </>}
+        <div className="hero-copy">
+          <span className="pill lime"><Zap size={13} />继续上次学习</span>
+          <h2>Shell、终端与命令执行</h2>
+          <p>计算机程序设计基础（1）· 补充材料 1</p>
+          <div className="hero-progress-row"><span>课程进度</span><strong>3 / 5</strong></div>
+          <div className="hero-progress"><span style={{ width: '58%' }} /></div>
+          <Link className="button light" to={leadReplay}>继续课堂重放 <ArrowRight size={17} /></Link>
+        </div>
+        <div className="hero-visual" aria-hidden="true">
+          <div className="orbit orbit-one" /><div className="orbit orbit-two" />
+          <div className="hero-node main-node"><BrainCircuit size={29} /><span>化简</span></div>
+          <div className="hero-node node-a">A · B</div>
+          <div className="hero-node node-b">A + B</div>
+          <div className="hero-node node-c">K-map</div>
+          <span className="connector connector-a" /><span className="connector connector-b" /><span className="connector connector-c" />
+        </div>
       </section>
 
       <section className="metric-grid">
@@ -266,40 +248,28 @@ function Dashboard({ courses, setCourses, notify }: { courses: Course[]; setCour
       </section>
 
       <section className="section-block">
-        <div className="section-heading"><div><h2>我的课程</h2><p>每门课都有独立的材料库与知识路径</p></div><button type="button" className="text-button" aria-haspopup="dialog" onClick={() => setShowAllCourses(true)}>查看全部 <ArrowRight size={15} /></button></div>
+        <div className="section-heading"><div><h2>我的课程</h2><p>每门课都有独立的知识路径与学习记录</p></div><button className="text-button">查看全部 <ArrowRight size={15} /></button></div>
         <div className="course-grid">
-          {courses.map((course) => <CourseCard
-            key={course.id}
-            course={course}
-            menuOpen={openCourseMenuId === course.id}
-            onToggleMenu={() => setOpenCourseMenuId(openCourseMenuId === course.id ? null : course.id)}
-            onEdit={() => { setOpenCourseMenuId(null); setEditingCourse(course) }}
-            onDelete={() => { setOpenCourseMenuId(null); setDeletingCourse(course) }}
-          />)}
-          <button className="new-course-card" onClick={() => openCreateModal()}><span><Plus size={22} /></span><strong>创建新课程</strong><small>导入课件，开始构建知识路径</small></button>
+          {courses.map((course) => <CourseCard key={course.id} course={course} />)}
+          <button className="new-course-card" onClick={() => setShowCreate(true)}><span><Plus size={22} /></span><strong>创建新课程</strong><small>导入课件，开始构建知识路径</small></button>
         </div>
       </section>
 
-      {showAllCourses && <AllCoursesModal courses={courses} onClose={() => setShowAllCourses(false)} onCreate={() => { setShowAllCourses(false); setShowCreate(true) }} />}
-      {showCreate && <CreateCourseModal onClose={() => setShowCreate(false)} onCreate={(course) => { setCourses([...courses, course]); setShowCreate(false); navigate(`/courses/${course.id}`); notify('课程已创建，可以导入材料了') }} />}
-      {editingCourse && <EditCourseModal
-        course={editingCourse}
-        onClose={() => setEditingCourse(null)}
-        onSave={(title, description) => {
-          setCourses(courses.map((course) => course.id === editingCourse.id ? { ...course, title, description, updated: '刚刚' } : course))
-          setEditingCourse(null)
-          notify('课程信息已更新')
-        }}
-      />}
-      {deletingCourse && <DeleteCourseModal
-        course={deletingCourse}
-        onClose={() => setDeletingCourse(null)}
-        onConfirm={() => {
-          setCourses(courses.filter((course) => course.id !== deletingCourse.id))
-          setDeletingCourse(null)
-          notify('课程已删除')
-        }}
-      />}
+      <section className="lower-grid">
+        <div className="panel activity-panel">
+          <div className="section-heading compact"><div><h2>最近活动</h2></div><button className="icon-button small"><MoreHorizontal size={17} /></button></div>
+          <Activity icon={<Check size={15} />} color="green" title="完成「布尔代数」知识检验" meta="数字电路基础 · 今天 14:28" badge="掌握度 +15%" />
+          <Activity icon={<MessageSquareText size={15} />} color="blue" title="探索：为什么德摩根定律可以推广？" meta="数字电路基础 · 今天 14:12" />
+          <Activity icon={<FileText size={15} />} color="orange" title="生成期中复习题单" meta="信号与系统 · 昨天 21:08" badge="12 道题" />
+        </div>
+        <div className="panel focus-panel">
+          <span className="pill amber"><Sparkles size={13} />AI 学习建议</span>
+          <h3>先补上“卡诺图相邻项”</h3>
+          <p>最近两次回答都在边界环绕规则上出错。花 6 分钟补齐这个前置知识，再继续组合逻辑设计。</p>
+          <Link to={leadReplay} className="text-link">进入针对性复习 <ArrowRight size={15} /></Link>
+        </div>
+      </section>
+      {showCreate && <CreateCourseModal onClose={() => setShowCreate(false)} onCreate={(course) => { setCourses([...courses, course]); setShowCreate(false); notify('课程已创建，去里面新建小节吧'); navigate(`/courses/${course.id}`) }} />}
     </div>
   )
 }
@@ -308,79 +278,22 @@ function Metric({ icon, label, value, delta, positive }: { icon: ReactNode; labe
   return <div className="metric"><div className="metric-icon">{icon}</div><div><span>{label}</span><strong>{value}</strong><small className={positive ? 'positive' : ''}>{delta}</small></div></div>
 }
 
-function CourseCard({ course, menuOpen, onToggleMenu, onEdit, onDelete }: {
-  course: Course
-  menuOpen: boolean
-  onToggleMenu: () => void
-  onEdit: () => void
-  onDelete: () => void
-}) {
-  const displayedMastery = ['digital-circuits', 'programming-linux'].includes(course.id) ? loadMastery() : course.mastery
+function CourseCard({ course }: { course: Course }) {
+  const displayedMastery = courseMastery(course)
+  const stats = courseStats(course)
   return (
-    <article className="course-card">
-      <div className="course-card-top">
-        <span className="course-swatch" style={{ background: course.accent }} />
-        <div className="course-card-actions">
-          <button
-            type="button"
-            className="icon-button tiny more-button"
-            aria-label={`管理课程：${course.title}`}
-            aria-expanded={menuOpen}
-            aria-haspopup="menu"
-            onClick={onToggleMenu}
-          ><MoreHorizontal size={16} /></button>
-          {menuOpen && <div className="course-action-menu" role="menu">
-            <button type="button" role="menuitem" onClick={onEdit}><Pencil size={14} />编辑课程</button>
-            <button type="button" role="menuitem" className="delete-action" onClick={onDelete}><Trash2 size={14} />删除课程</button>
-          </div>}
-        </div>
-      </div>
-      <Link to={`/courses/${course.id}`} className="course-card-content">
-        <div className="course-code">{course.code}</div><h3>{course.title}</h3><p>{courseSubtitle(course)}</p>
-        <div className="tag-row">{course.tags.map((tag, index) => <span key={`${tag}-${index}`} title={tag}>{formatConceptLabel(tag)}</span>)}</div>
-        <div className="card-divider" />
-        <div className="course-footer"><div><span>{course.materials.length} 份材料</span><small>最近学习 {course.updated}</small></div><div className="ring" style={{ '--value': `${displayedMastery * 3.6}deg`, '--accent': course.accent } as React.CSSProperties}><span>{displayedMastery}%</span></div></div>
-      </Link>
-    </article>
+    <Link to={`/courses/${course.id}`} className="course-card">
+      <div className="course-card-top"><span className="course-swatch" style={{ background: course.accent }} /><button className="icon-button tiny" onClick={(event) => event.preventDefault()}><MoreHorizontal size={16} /></button></div>
+      <div className="course-code">{course.code}</div><h3>{course.title}</h3><p>{courseSubtitle(course)}</p>
+      <div className="tag-row">{course.tags.map((tag, index) => <span key={`${tag}-${index}`} title={tag}>{formatConceptLabel(tag)}</span>)}</div>
+      <div className="card-divider" />
+      <div className="course-footer"><div><span>{stats.sections} 个小节 · {stats.materials} 份材料</span><small>最近学习 {course.updated || '刚刚'}</small></div><div className="ring" style={{ '--value': `${displayedMastery * 3.6}deg`, '--accent': course.accent } as React.CSSProperties}><span>{displayedMastery}%</span></div></div>
+    </Link>
   )
 }
 
-function AllCoursesModal({ courses, onClose, onCreate }: { courses: Course[]; onClose: () => void; onCreate: () => void }) {
-  const dialogRef = useRef<HTMLDialogElement>(null)
-  const [search, setSearch] = useState('')
-  const query = search.trim().toLocaleLowerCase()
-  const filteredCourses = courses.filter((course) => [course.title, course.code, course.description, ...course.tags].join(' ').toLocaleLowerCase().includes(query))
-
-  useEffect(() => {
-    const dialog = dialogRef.current
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const previousOverflow = document.body.style.overflow
-    dialog?.showModal()
-    document.body.style.overflow = 'hidden'
-    return () => {
-      dialog?.close()
-      document.body.style.overflow = previousOverflow
-      if (previousFocus?.isConnected) previousFocus.focus()
-    }
-  }, [])
-
-  return <dialog ref={dialogRef} className="modal all-courses-modal" aria-labelledby="all-courses-title" onCancel={(event) => { event.preventDefault(); onClose() }} onClick={(event) => {
-    if (event.target !== event.currentTarget) return
-    const rect = event.currentTarget.getBoundingClientRect()
-    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose()
-  }}>
-    <div className="modal-head"><div><span className="eyebrow">YOUR COURSE LIBRARY</span><h2 id="all-courses-title">全部课程</h2><p>共 {courses.length} 门课程 · 选择一门继续学习</p></div><button type="button" className="icon-button" aria-label="关闭全部课程" onClick={onClose}><X size={20} /></button></div>
-    <label className="all-courses-search"><Search size={18} aria-hidden="true" /><input autoFocus type="search" aria-label="搜索课程" placeholder="搜索课程名称、简介或标签…" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
-    <div className="all-courses-results">
-      {filteredCourses.length ? <div className="all-courses-grid">{filteredCourses.map((course) => <Link className="all-courses-item" key={course.id} to={`/courses/${course.id}`} onClick={onClose}>
-        <div className="all-courses-item-head"><span className="course-swatch" style={{ background: course.accent }} /><span>{course.code}</span><ArrowRight size={18} /></div>
-        <h3>{course.title}</h3><p>{courseSubtitle(course)}</p>
-        <div className="tag-row">{course.tags.slice(0, 3).map((tag, index) => <span key={`${tag}-${index}`}>{formatConceptLabel(tag)}</span>)}</div>
-        <div className="all-courses-item-meta"><span><FileText size={14} />{course.materials.length} 份材料</span><span>最近学习 {course.updated}</span></div>
-      </Link>)}</div> : <div className="all-courses-empty"><Library size={32} /><h3>{courses.length ? '没有找到匹配的课程' : '还没有课程'}</h3><p>{courses.length ? '试试其他关键词，或清空搜索查看全部课程。' : '创建课程并上传资料，开始构建你的知识路径。'}</p>{query && <button type="button" className="button ghost" onClick={() => setSearch('')}>清空搜索</button>}</div>}
-    </div>
-    <div className="all-courses-footer"><span role="status">显示 {filteredCourses.length} / {courses.length} 门课程</span><button type="button" className="button primary" onClick={onCreate}><Plus size={17} />创建课程</button></div>
-  </dialog>
+function Activity({ icon, color, title, meta, badge }: { icon: ReactNode; color: string; title: string; meta: string; badge?: string }) {
+  return <div className="activity-row"><span className={`activity-icon ${color}`}>{icon}</span><div><strong>{title}</strong><small>{meta}</small></div>{badge && <span className="activity-badge">{badge}</span>}</div>
 }
 
 function CreateCourseModal({ onClose, onCreate }: { onClose: () => void; onCreate: (course: Course) => void }) {
@@ -390,111 +303,108 @@ function CreateCourseModal({ onClose, onCreate }: { onClose: () => void; onCreat
     event.preventDefault()
     if (!title.trim()) return
     const id = `${title.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`
-    onCreate({ id, title: title.trim(), description: description.trim() || '一门新的课程，等待导入学习材料。', code: 'NEW · 2026 秋', tags: ['新课程'], mastery: 0, materials: [], updated: '刚刚', accent: '#c7f45d' })
+    onCreate({ id, title: title.trim(), description: description.trim() || '一门新的课程，等待新建小节。', code: 'NEW · 2026 秋', tags: ['新课程'], mastery: 0, updated: '刚刚', accent: '#c7f45d', sections: [] })
   }
-  return <div className="modal-backdrop" onMouseDown={onClose}><form className="modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">NEW COURSE</span><h2>创建一门课程</h2></div><button type="button" className="icon-button" onClick={onClose}><X size={18} /></button></div><label>课程名称<input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如：数字信号处理" /></label><label>课程简介<textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="这门课主要学习什么？" /></label><div className="modal-actions"><button type="button" className="button ghost" onClick={onClose}>取消</button><button className="button primary" disabled={!title.trim()}>创建并导入材料 <ArrowRight size={16} /></button></div></form></div>
-}
-
-function EditCourseModal({ course, onClose, onSave }: {
-  course: Course
-  onClose: () => void
-  onSave: (title: string, description: string) => void
-}) {
-  const [title, setTitle] = useState(course.title)
-  const [description, setDescription] = useState(course.description)
-  const submit = (event: FormEvent) => {
-    event.preventDefault()
-    if (!title.trim()) return
-    onSave(title.trim(), description.trim())
-  }
-  return <div className="modal-backdrop" onMouseDown={onClose}>
-    <form className="modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
-      <div className="modal-head"><div><span className="eyebrow">EDIT COURSE</span><h2>编辑课程</h2></div><button type="button" className="icon-button" aria-label="关闭" onClick={onClose}><X size={18} /></button></div>
-      <label>课程名称<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="输入课程名称" /></label>
-      <label>课程介绍<textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="输入课程介绍" /></label>
-      <div className="modal-actions"><button type="button" className="button ghost" onClick={onClose}>取消</button><button className="button primary" disabled={!title.trim()}>保存修改</button></div>
-    </form>
-  </div>
-}
-
-function DeleteCourseModal({ course, onClose, onConfirm }: {
-  course: Course
-  onClose: () => void
-  onConfirm: () => void
-}) {
-  return <div className="modal-backdrop" onMouseDown={onClose}>
-    <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-course-title" onMouseDown={(event) => event.stopPropagation()}>
-      <div className="modal-head"><div><span className="eyebrow">DELETE COURSE</span><h2 id="delete-course-title">删除课程？</h2></div><button type="button" className="icon-button" aria-label="关闭" onClick={onClose}><X size={18} /></button></div>
-      <p className="delete-course-message">确定删除“{course.title}”吗？此操作会从本地课程列表中移除该课程。</p>
-      <div className="modal-actions"><button type="button" className="button ghost" onClick={onClose}>取消</button><button type="button" className="button danger" onClick={onConfirm}>删除课程</button></div>
-    </div>
-  </div>
+  return <div className="modal-backdrop" onMouseDown={onClose}><form className="modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">NEW COURSE</span><h2>创建一门课程</h2></div><button type="button" className="icon-button" onClick={onClose}><X size={18} /></button></div><label>课程名称<input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如：数字信号处理" /></label><label>课程简介<textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="这门课主要学习什么？" /></label><div className="modal-actions"><button type="button" className="button ghost" onClick={onClose}>取消</button><button className="button primary" disabled={!title.trim()}>创建课程 <ArrowRight size={16} /></button></div></form></div>
 }
 
 function useCourse(courses: Course[]) {
   const { courseId = '' } = useParams()
-  return courses.find((course) => course.id === courseId) || courses[0]
+  return courses.find((course) => course.id === courseId)
 }
 
-function CourseSubnav({ course }: { course: Course }) {
-  return <div className="course-subnav"><NavLink end to={`/courses/${course.id}`}>材料库</NavLink><NavLink to={`/courses/${course.id}/replay`}>课堂重放</NavLink></div>
+function useSection(courses: Course[]) {
+  const { courseId = '', sectionId = '' } = useParams()
+  const course = courses.find((item) => item.id === courseId)
+  const section = course?.sections.find((item) => item.id === sectionId)
+  return { course, section }
 }
 
-function CourseDetail({ courses, setCourses, notify }: { courses: Course[]; setCourses: Dispatch<SetStateAction<Course[]>>; notify: (message: string) => void }) {
+function SectionSubnav({ courseId, sectionId }: { courseId: string; sectionId: string }) {
+  const base = `/courses/${courseId}/sections/${sectionId}`
+  return <div className="course-subnav"><NavLink end to={base}>材料与构建</NavLink><NavLink to={`${base}/replay`}>课堂重放</NavLink><NavLink to={`${base}/review`}>复习工坊</NavLink><NavLink to={`${base}/progress`}>学习记录</NavLink></div>
+}
+
+function LegacySectionRedirect({ courses, suffix }: { courses: Course[]; suffix: string }) {
+  const { courseId = '' } = useParams()
+  const course = courses.find((item) => item.id === courseId)
+  if (!course) return <NotFound />
+  const sectionId = course.sections[0]?.id
+  return <Navigate to={sectionId ? `/courses/${courseId}/sections/${sectionId}/${suffix}` : `/courses/${courseId}`} replace />
+}
+
+function CourseSections({ courses, setCourses, notify }: { courses: Course[]; setCourses: Dispatch<SetStateAction<Course[]>>; notify: (message: string) => void }) {
   const course = useCourse(courses)
+  const navigate = useNavigate()
+  const [showCreate, setShowCreate] = useState(false)
+  if (!course) return <NotFound />
+  const stats = courseStats(course)
+  const createSectionAndOpen = (title: string) => {
+    const section = createSection(title)
+    setCourses((current) => current.map((item) => item.id === course.id ? { ...item, sections: [...item.sections, section], updated: '刚刚' } : item))
+    setShowCreate(false)
+    notify('小节已创建，上传文件后点击开始构建')
+    navigate(`/courses/${course.id}/sections/${section.id}`)
+  }
+  const deleteSection = (sectionId: string) => {
+    setCourses((current) => current.map((item) => item.id === course.id ? { ...item, sections: item.sections.filter((section) => section.id !== sectionId) } : item))
+    notify('小节已删除')
+  }
+  return <div className="page">
+    <div className="back-row"><Link to="/"><ArrowLeft size={16} />全部课程</Link><span>/</span><span>{course.title}</span></div>
+    <PageHeader title={course.title} subtitle={courseSubtitle(course)} actions={<button className="button primary" onClick={() => setShowCreate(true)}><Plus size={17} />新建小节</button>} />
+    <div className="overview-strip">
+      <div><span>小节</span><strong>{course.sections.length}</strong><small>个独立单元</small></div>
+      <div><span>材料</span><strong>{stats.materials}</strong><small>份课堂资料</small></div>
+      <div><span>知识点</span><strong>{stats.stages}</strong><small>跨全部小节</small></div>
+      <div className="overview-action"><span>整体掌握</span><strong>{courseMastery(course)}%</strong><small>各小节平均</small></div>
+    </div>
+    <section className="section-block">
+      <div className="section-heading"><div><h2>课程小节</h2><p>每个小节独立上传文件、独立构建与学习，内容互不混用</p></div></div>
+      <div className="course-grid section-grid">
+        {course.sections.map((section) => <SectionCard key={section.id} courseId={course.id} section={section} onDelete={() => deleteSection(section.id)} />)}
+        <button className="new-course-card" onClick={() => setShowCreate(true)}><span><Plus size={22} /></span><strong>新建小节</strong><small>上传本节课件，开始构建</small></button>
+      </div>
+    </section>
+    {showCreate && <CreateSectionModal onClose={() => setShowCreate(false)} onCreate={createSectionAndOpen} />}
+  </div>
+}
+
+function SectionCard({ courseId, section, onDelete }: { courseId: string; section: Section; onDelete: () => void }) {
+  const ready = section.status === 'ready'
+  const stageCount = section.knowledgeMap?.length || section.analysis?.learning_path.length || 0
+  const statusLabel = section.status === 'ready' ? '已构建' : section.status === 'building' ? '构建中' : section.status === 'failed' ? '构建失败' : '待构建'
+  return <Link to={`/courses/${courseId}/sections/${section.id}`} className="course-card section-card">
+    <div className="course-card-top"><span className={`section-status ${section.status}`}>{statusLabel}</span><button className="icon-button tiny" aria-label="删除小节" onClick={(event) => { event.preventDefault(); onDelete() }}><Trash2 size={15} /></button></div>
+    <h3>{section.title}</h3>
+    <p>{section.analysis ? trimText(section.analysis.summary, 92) : '上传文件并点击“开始构建”，生成本节的分层讲稿与题目。'}</p>
+    <div className="card-divider" />
+    <div className="course-footer"><div><span>{section.materials.length} 份材料 · {stageCount} 个知识点</span><small>{ready ? '可开始学习' : section.status === 'building' ? '正在构建…' : '等待构建'}</small></div>{ready && <span className="section-go"><ArrowRight size={16} /></span>}</div>
+  </Link>
+}
+
+function CreateSectionModal({ onClose, onCreate }: { onClose: () => void; onCreate: (title: string) => void }) {
+  const [title, setTitle] = useState('')
+  const submit = (event: FormEvent) => { event.preventDefault(); if (!title.trim()) return; onCreate(title.trim()) }
+  return <div className="modal-backdrop" onMouseDown={onClose}><form className="modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">NEW SECTION</span><h2>新建小节</h2></div><button type="button" className="icon-button" onClick={onClose}><X size={18} /></button></div><label>小节名称<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：第 3 章 · 递推与动态规划" /></label><div className="modal-actions"><button type="button" className="button ghost" onClick={onClose}>取消</button><button className="button primary" disabled={!title.trim()}>创建并上传材料 <ArrowRight size={16} /></button></div></form></div>
+}
+
+function SectionDetail({ courses, setCourses, notify }: { courses: Course[]; setCourses: Dispatch<SetStateAction<Course[]>>; notify: (message: string) => void }) {
+  const { course, section } = useSection(courses)
   const inputRef = useRef<HTMLInputElement>(null)
+  const stagedFilesRef = useRef<Map<string, File>>(new Map())
   const uploadControllerRef = useRef<AbortController | null>(null)
-  const uploadMaterialIdsRef = useRef<string[]>([])
-  const recoveryAttemptedRef = useRef('')
-  const [uploading, setUploading] = useState(false)
-  const [uploadMessage, setUploadMessage] = useState('正在上传课堂材料')
   const [apiError, setApiError] = useState('')
   const [openMaterialMenu, setOpenMaterialMenu] = useState<string | null>(null)
   const [analysisExpanded, setAnalysisExpanded] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const [nowTs, setNowTs] = useState(() => Date.now())
   const courseId = course?.id
-  const processingJob = course?.processingJob
-  const orphanMaterials = course?.materials.filter((material) => material.status === 'processing') || []
-  const orphanSignature = orphanMaterials.map((material) => material.id).join('|')
+  const sectionId = section?.id
+  const processingJob = section?.processingJob
 
   useEffect(() => {
-    if (!courseId || uploading || processingJob || !orphanMaterials.length) return
-    const signature = `${courseId}:${orphanSignature}`
-    if (recoveryAttemptedRef.current === signature) return
-    recoveryAttemptedRef.current = signature
-    let active = true
-
-    const recover = async () => {
-      try {
-        const response = await fetch('/api/process')
-        if (!response.ok) throw new Error('无法读取后台任务')
-        const jobs = await response.json() as { job_id: string; status: string; stage: string; progress: number; message: string; filenames: string[] }[]
-        if (!active) return
-        const names = new Set(orphanMaterials.map((material) => material.name))
-        const match = jobs.find((job) => ['queued', 'running'].includes(job.status) && job.filenames.some((name) => names.has(name)))
-        if (match) {
-          const materialIds = orphanMaterials.filter((material) => match.filenames.includes(material.name)).map((material) => material.id)
-          setCourses((current) => current.map((item) => item.id === courseId && !item.processingJob ? {
-            ...item,
-            processingJob: { jobId: match.job_id, materialIds, progress: match.progress, stage: match.stage, message: match.message },
-          } : item))
-          return
-        }
-        const orphanIds = new Set(orphanMaterials.map((material) => material.id))
-        setCourses((current) => current.map((item) => item.id === courseId && !item.processingJob ? {
-          ...item,
-          materials: item.materials.map((material) => orphanIds.has(material.id) ? { ...material, status: 'failed' as const, error: '处理任务已中断，请重新上传' } : material),
-        } : item))
-      } catch {
-        recoveryAttemptedRef.current = ''
-      }
-    }
-
-    void recover()
-    return () => { active = false }
-  }, [courseId, orphanSignature, processingJob, setCourses, uploading])
-
-  useEffect(() => {
-    if (!courseId || !processingJob?.jobId) return
+    if (!courseId || !sectionId || !processingJob?.jobId) return
     let active = true
     const controller = new AbortController()
     const jobId = processingJob.jobId
@@ -503,11 +413,12 @@ function CourseDetail({ courses, setCourses, notify }: { courses: Course[]; setC
     const failJob = (message: string) => {
       if (!active) return
       setApiError(message)
-      setCourses((current) => current.map((item) => item.id === courseId && item.processingJob?.jobId === jobId ? {
-        ...item,
+      updateSection(setCourses, courseId, sectionId, (current) => current.processingJob?.jobId === jobId ? {
+        ...current,
         processingJob: undefined,
-        materials: item.materials.map((material) => materialIds.includes(material.id) ? { ...material, status: 'failed' as const, error: message } : material),
-      } : item))
+        status: 'failed',
+        materials: current.materials.map((material) => materialIds.includes(material.id) ? { ...material, status: 'failed' as const, error: message } : material),
+      } : current)
     }
 
     const poll = async () => {
@@ -518,11 +429,11 @@ function CourseDetail({ courses, setCourses, notify }: { courses: Course[]; setC
           if (!response.ok) throw new Error(job.detail || `读取任务状态失败（HTTP ${response.status}）`)
           if (!active) return
 
-          setCourses((current) => current.map((item) => item.id === courseId && item.processingJob?.jobId === jobId ? {
-            ...item,
-            processingJob: { ...item.processingJob!, progress: job.progress || 0, stage: job.stage || 'queued', message: job.message || '正在处理材料' },
-            materials: item.materials.map((material) => materialIds.includes(material.id) ? { ...material, progress: job.progress || 0 } : material),
-          } : item))
+          updateSection(setCourses, courseId, sectionId, (current) => current.processingJob?.jobId === jobId ? {
+            ...current,
+            processingJob: { ...current.processingJob!, progress: job.progress || 0, stage: job.stage || 'queued', message: job.message || '正在处理材料', filesTotal: job.files_total, filesDone: job.files_done, currentFile: job.current_file, pagesTotal: job.pages_total, pagesDone: job.pages_done },
+            materials: current.materials.map((material) => materialIds.includes(material.id) ? { ...material, progress: job.progress || 0 } : material),
+          } : current)
 
           if (job.status === 'completed' && job.result) {
             const payload = job.result as {
@@ -530,14 +441,14 @@ function CourseDetail({ courses, setCourses, notify }: { courses: Course[]; setC
               model: string
               documents: { filename: string; pages: number; processing: string; preview_url: string }[]
             }
-            setCourses((current) => current.map((item) => item.id === courseId && item.processingJob?.jobId === jobId ? {
-              ...item,
+            updateSection(setCourses, courseId, sectionId, (current) => current.processingJob?.jobId === jobId ? {
+              ...current,
               processingJob: undefined,
+              status: 'ready',
               analysis: payload.analysis,
-              knowledgeMap: deriveKnowledgeMap(payload.analysis),
               analysisJobId: jobId,
-              tags: payload.analysis.key_concepts.slice(0, 3).map(formatConceptLabel),
-              materials: item.materials.map((material) => {
+              knowledgeMap: payload.analysis.knowledge_map?.length ? payload.analysis.knowledge_map : undefined,
+              materials: current.materials.map((material) => {
                 if (!materialIds.includes(material.id)) return material
                 const materialIndex = materialIds.indexOf(material.id)
                 const document = payload.documents[materialIndex] || payload.documents.find((entry) => entry.filename === material.name)
@@ -551,9 +462,10 @@ function CourseDetail({ courses, setCourses, notify }: { courses: Course[]; setC
                   meta: document ? `${document.pages} 页 · ${document.processing}` : material.meta,
                 }
               }),
-            } : item))
+            } : current)
+            setCourses((current) => current.map((item) => item.id === courseId ? { ...item, updated: '刚刚', tags: item.tags?.length ? item.tags : payload.analysis.key_concepts.slice(0, 3).map(formatConceptLabel) } : item))
             setApiError('')
-            notify(`材料处理完成，已由 ${payload.model} 生成学习路径`)
+            notify('小节构建完成，已生成分层学习内容')
             return
           }
           if (job.status === 'failed') return failJob(job.error || job.message || '材料处理失败')
@@ -571,407 +483,269 @@ function CourseDetail({ courses, setCourses, notify }: { courses: Course[]; setC
       active = false
       controller.abort()
     }
-  }, [courseId, processingJob?.jobId, setCourses])
+  }, [courseId, sectionId, processingJob?.jobId, setCourses])
 
-  if (!course) return <NotFound />
+  // Tick every second while building so elapsed / ETA stay live.
+  const isBuilding = Boolean(processingJob) || starting
+  useEffect(() => {
+    if (!isBuilding) return
+    setNowTs(Date.now())
+    const timer = window.setInterval(() => setNowTs(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [isBuilding])
 
-  const processing = uploading || Boolean(processingJob)
-  const progress = processingJob?.progress ?? (uploading ? 5 : 0)
-  const stageKey = processingJob?.stage ?? 'uploading'
-  const processingStage = processingJob?.message ?? uploadMessage
+  if (!course || !section) return <NotFound />
 
-  const cancelProcessing = async () => {
-    if (!processing) return
-    uploadControllerRef.current?.abort()
-    const job = course.processingJob
-    if (job?.jobId) void fetch(`/api/process/${job.jobId}`, { method: 'DELETE' }).catch(() => undefined)
-    const ids = new Set(job?.materialIds || uploadMaterialIdsRef.current)
-    setCourses((current) => current.map((item) => item.id === course.id ? {
-      ...item,
-      processingJob: undefined,
-      materials: item.materials.map((material) => ids.has(material.id) ? { ...material, status: 'cancelled' as const, error: '已由你取消' } : material),
-    } : item))
-    setUploading(false)
+  const building = Boolean(processingJob) || starting
+  const pendingCount = section.materials.filter((material) => material.status === 'pending').length
+  const canBuild = pendingCount > 0 && !building
+  const analysis = section.analysis
+  const learningSteps = analysis?.learning_path.map(formatLearningStep) || []
+  const conceptLabels = analysis?.key_concepts.map(formatConceptLabel) || []
+
+  const stageFiles = (files: FileList | null) => {
+    if (!files?.length || building) return
+    const selected = Array.from(files)
+    const additions: Material[] = selected.map((file, index) => ({ id: `stage-${Date.now()}-${index}`, name: file.name, meta: `${Math.max(1, Math.round(file.size / 1024))} KB · 待构建`, type: file.name.split('.').pop()?.toUpperCase() || 'FILE', status: 'pending', progress: 0 }))
+    additions.forEach((material, index) => stagedFilesRef.current.set(material.id, selected[index]))
+    updateSection(setCourses, course.id, section.id, (current) => ({ ...current, materials: [...current.materials, ...additions] }))
     setApiError('')
-    notify('处理已取消，可以重新选择文件')
+    if (inputRef.current) inputRef.current.value = ''
   }
 
-  const deleteMaterial = (materialId: string) => {
-    const job = course.processingJob
-    const cancelsJob = Boolean(job?.materialIds.includes(materialId))
-    if (cancelsJob && job) void fetch(`/api/process/${job.jobId}`, { method: 'DELETE' }).catch(() => undefined)
-    setCourses((current) => current.map((item) => {
-      if (item.id !== course.id) return item
-      const activeIds = new Set(item.processingJob?.materialIds || [])
-      return {
-        ...item,
-        processingJob: cancelsJob ? undefined : item.processingJob,
-        materials: item.materials
-          .filter((material) => material.id !== materialId)
-          .map((material) => cancelsJob && activeIds.has(material.id) ? { ...material, status: 'cancelled' as const, error: '同批任务已取消' } : material),
-      }
-    }))
+  const removeMaterial = (materialId: string) => {
+    stagedFilesRef.current.delete(materialId)
+    updateSection(setCourses, course.id, section.id, (current) => ({ ...current, materials: current.materials.filter((material) => material.id !== materialId) }))
     setOpenMaterialMenu(null)
-    notify(cancelsJob ? '材料已删除，同批处理任务已取消' : '材料已删除')
+    notify('文件已移除')
   }
 
-  const addFiles = async (files: FileList | null) => {
-    if (!files?.length || processing) return
-    const selectedFiles = Array.from(files)
-    const additions = selectedFiles.map((file, index) => ({ id: `upload-${Date.now()}-${index}`, name: file.name, meta: `${Math.max(1, Math.round(file.size / 1024))} KB`, type: file.name.split('.').pop()?.toUpperCase() || 'FILE', status: 'processing' as const, progress: 0 }))
-    const materialIds = additions.map((item) => item.id)
-    uploadMaterialIdsRef.current = materialIds
+  const startBuild = async () => {
+    const staged = section.materials.filter((material) => material.status === 'pending' && stagedFilesRef.current.has(material.id))
+    if (!staged.length) {
+      setApiError('没有可构建的文件：请先上传文件（刷新后未构建的暂存文件会丢失，需重新上传）')
+      return
+    }
+    const materialIds = staged.map((material) => material.id)
     const controller = new AbortController()
     uploadControllerRef.current = controller
-    setCourses((current) => current.map((item) => item.id === course.id ? { ...item, materials: [...item.materials, ...additions], updated: '刚刚' } : item))
+    setStarting(true)
     setApiError('')
-    setUploading(true)
-    setUploadMessage(`正在上传 ${selectedFiles.length} 份材料`)
-
+    updateSection(setCourses, course.id, section.id, (current) => ({
+      ...current,
+      status: 'building',
+      materials: current.materials.map((material) => materialIds.includes(material.id) ? { ...material, status: 'processing' as const, meta: '正在上传…' } : material),
+    }))
     const formData = new FormData()
-    selectedFiles.forEach((file) => formData.append('files', file))
+    staged.forEach((material) => { const file = stagedFilesRef.current.get(material.id); if (file) formData.append('files', file) })
     try {
       const response = await fetch('/api/process/start', { method: 'POST', body: formData, signal: controller.signal })
       const payload = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(payload.detail || `上传失败（HTTP ${response.status}）`)
-      setCourses((current) => current.map((item) => item.id === course.id ? {
-        ...item,
-        processingJob: { jobId: payload.job_id, materialIds, progress: 8, stage: 'queued', message: '文件已上传，等待处理' },
-      } : item))
+      if (!response.ok) throw new Error(payload.detail || `构建启动失败（HTTP ${response.status}）`)
+      updateSection(setCourses, course.id, section.id, (current) => ({ ...current, processingJob: { jobId: payload.job_id, materialIds, progress: 8, stage: 'queued', message: '文件已上传，等待处理', filesTotal: staged.length, filesDone: 0, pagesDone: 0, startedAt: Date.now() } }))
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
-      const message = error instanceof Error ? error.message : '材料上传失败'
+      const message = error instanceof Error ? error.message : '构建启动失败'
       setApiError(message)
-      setCourses((current) => current.map((item) => item.id === course.id ? {
-        ...item,
-        materials: item.materials.map((material) => materialIds.includes(material.id) ? { ...material, status: 'failed' as const, error: message } : material),
-      } : item))
+      updateSection(setCourses, course.id, section.id, (current) => ({
+        ...current,
+        status: 'failed',
+        materials: current.materials.map((material) => materialIds.includes(material.id) ? { ...material, status: 'failed' as const, error: message } : material),
+      }))
     } finally {
-      setUploading(false)
+      setStarting(false)
       uploadControllerRef.current = null
-      if (inputRef.current) inputRef.current.value = ''
     }
   }
 
-  const stages = [
+  const cancelBuild = async () => {
+    uploadControllerRef.current?.abort()
+    const job = section.processingJob
+    if (job?.jobId) void fetch(`/api/process/${job.jobId}`, { method: 'DELETE' }).catch(() => undefined)
+    const ids = new Set(job?.materialIds || [])
+    updateSection(setCourses, course.id, section.id, (current) => ({
+      ...current,
+      processingJob: undefined,
+      status: current.analysis ? 'ready' : 'empty',
+      materials: current.materials.map((material) => ids.has(material.id) ? { ...material, status: 'pending' as const, meta: '待构建', error: undefined } : material),
+    }))
+    setStarting(false)
+    setApiError('')
+    notify('已取消构建')
+  }
+
+  const stages: [string, string][] = [
     ['uploading', '上传文件'],
-    ['rendering', '准备完整页面'],
-    ['model', 'AI 视觉分析'],
-    ['finalizing', '保存课程结果'],
+    ['rendering', '逐页渲染'],
+    ['model', 'AI 逐文件分析'],
+    ['finalizing', '整理讲稿'],
   ]
+  const stageKey = processingJob?.stage ?? 'uploading'
   const activeStageIndex = stageKey === 'queued' ? 0 : stageKey === 'completed' ? stages.length : stages.findIndex(([key]) => key === stageKey)
-  const analysis = course.analysis
-  const learningSteps = analysis?.learning_path.map(formatLearningStep) || []
-  const conceptLabels = analysis?.key_concepts.map(formatConceptLabel) || []
-  const nextStep = learningSteps[0]?.title || '先导入课堂材料'
+  const progress = processingJob?.progress ?? (starting ? 5 : 0)
+  const filesLine = processingJob?.filesTotal ? `第 ${Math.min((processingJob.filesDone || 0) + 1, processingJob.filesTotal)} / ${processingJob.filesTotal} 个文件` : ''
+  const pagesLine = processingJob?.pagesTotal ? `已构建 ${processingJob.pagesDone || 0} / ${processingJob.pagesTotal} 页` : (processingJob?.pagesDone ? `已构建 ${processingJob.pagesDone} 页` : '')
+  const elapsedSec = processingJob?.startedAt ? Math.max(0, (nowTs - processingJob.startedAt) / 1000) : 0
+  const estPages = processingJob?.pagesTotal || (processingJob?.filesTotal || pendingCount || 1) * 8
+  const estTotalSec = Math.max(20, estPages * 4 + 15)
+  const remainingSec = Math.max(0, estTotalSec - elapsedSec)
+  const buildLabel = analysis ? '重新构建' : '开始构建'
 
   return <div className="page">
-    <div className="back-row"><Link to="/"><ArrowLeft size={16} />全部课程</Link><span>/</span><span>{course.title}</span></div>
-    <PageHeader title={course.title} subtitle={courseSubtitle(course)} actions={<Link className="button primary" to={`/courses/${course.id}/replay`}><BrainCircuit size={17} />开始课堂重放</Link>} />
-    <CourseSubnav course={course} />
-    <div className="overview-strip"><div><span>材料</span><strong>{course.materials.length}</strong><small>份课堂资料</small></div><div><span>知识点</span><strong>{analysis?.key_concepts.length || 0}</strong><small>{analysis ? '来自本次分析' : '等待材料分析'}</small></div><div><span>整体掌握</span><strong>{course.mastery}%</strong><small className="positive">持续更新</small></div><div className="overview-action"><span>下一步</span><strong title={analysis?.learning_path[0]}>{nextStep}</strong><small>{analysis ? '进入课堂重放' : '支持多文件上传'}</small></div></div>
+    <div className="back-row"><Link to={`/courses/${course.id}`}><ArrowLeft size={16} />{course.title}</Link><span>/</span><span>{section.title}</span></div>
+    <PageHeader title={section.title} subtitle={analysis ? trimText(analysis.summary, 150) : '上传本小节的文件，再点击“开始构建”，逐个文件分析生成分层讲稿。'} actions={analysis ? <Link className="button primary" to={`/courses/${course.id}/sections/${section.id}/replay`}><BrainCircuit size={17} />开始学习</Link> : undefined} />
+    <SectionSubnav courseId={course.id} sectionId={section.id} />
+    <div className="overview-strip"><div><span>材料</span><strong>{section.materials.length}</strong><small>本节文件</small></div><div><span>待构建</span><strong>{pendingCount}</strong><small>已暂存文件</small></div><div><span>知识点</span><strong>{section.knowledgeMap?.length || analysis?.key_concepts.length || 0}</strong><small>{analysis ? '来自本次构建' : '等待构建'}</small></div><div className="overview-action"><span>状态</span><strong>{section.status === 'ready' ? '已构建' : section.status === 'building' ? '构建中' : section.status === 'failed' ? '构建失败' : '待构建'}</strong><small>{analysis ? '可开始学习' : '仅处理本小节文件'}</small></div></div>
     <div className="materials-layout">
       <section className="panel material-panel">
-        <div className="section-heading"><div><h2>课堂材料</h2><p>支持 PDF、PPTX、DOCX、Markdown、TXT 与图片</p></div><button className="button secondary" disabled={processing} onClick={() => inputRef.current?.click()}><UploadCloud size={17} />导入材料</button></div>
-        <input ref={inputRef} type="file" multiple hidden accept=".pdf,.ppt,.pptx,.doc,.docx,.odt,.odp,.md,.txt,.png,.jpg,.jpeg,.webp" onChange={(event) => addFiles(event.target.files)} />
-        <button className="drop-zone" onClick={() => inputRef.current?.click()} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files) }}><span><UploadCloud size={23} /></span><strong>拖入课件、笔记或板书照片</strong><small>或点击选择文件 · 单次可上传多份材料</small></button>
-        {processing && <div className="processing-card"><div className="processing-top"><div className="spinner" /><div><strong>{processingStage}</strong><span>整页视觉输入 · 不使用 OCR · 可以随时取消</span></div><b>{Math.min(progress, 100)}%</b></div><div className="thin-progress"><span style={{ width: `${Math.min(progress, 100)}%` }} /></div><div className="processing-stages">{stages.map(([key, label], index) => <span key={key} className={index < activeStageIndex ? 'done' : index === activeStageIndex ? 'active' : ''}>{index < activeStageIndex ? <Check size={12} /> : index + 1}{label}</span>)}</div><button className="button danger compact" onClick={() => void cancelProcessing()}><X size={15} />取消处理</button></div>}
-        {apiError && <div className="api-error"><CircleHelp size={18} /><div><strong>材料处理失败</strong><p>{apiError}</p></div></div>}
+        <div className="section-heading"><div><h2>本节材料</h2><p>支持 PDF、PPTX、DOCX、Markdown、TXT 与图片 · 仅属于本小节</p></div><div className="build-actions"><button className="button secondary" disabled={building} onClick={() => inputRef.current?.click()}><UploadCloud size={17} />上传文件</button><button className="button primary" disabled={!canBuild} onClick={() => void startBuild()}><Sparkles size={16} />{buildLabel}</button></div></div>
+        <input ref={inputRef} type="file" multiple hidden accept=".pdf,.ppt,.pptx,.doc,.docx,.odt,.odp,.md,.txt,.png,.jpg,.jpeg,.webp" onChange={(event) => stageFiles(event.target.files)} />
+        <button className="drop-zone" onClick={() => inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); stageFiles(event.dataTransfer.files) }}><span><UploadCloud size={23} /></span><strong>拖入本小节的课件、笔记或板书照片</strong><small>先上传（可多份），再点“{buildLabel}”逐个分析 · 刷新前请完成构建</small></button>
+        {building && <div className="processing-card"><div className="processing-top"><div className="spinner" /><div><strong>{processingJob?.message || '正在准备构建'}</strong><span>{[filesLine].filter(Boolean).join(' · ') || '整页视觉输入 · 不使用 OCR · 可随时取消'}{processingJob?.currentFile ? ` · ${processingJob.currentFile}` : ''}</span></div><b>{Math.min(progress, 100)}%</b></div><div className="thin-progress"><span style={{ width: `${Math.min(progress, 100)}%` }} /></div><div className="build-meta"><span><Clock3 size={13} />已用 {formatDuration(elapsedSec)}</span><span><Clock3 size={13} />{remainingSec > 1 ? `预计剩余 ~${formatDuration(remainingSec)}` : '即将完成…'}</span>{pagesLine && <span><FileText size={13} />{pagesLine}</span>}</div><div className="processing-stages">{stages.map(([key, label], index) => <span key={key} className={index < activeStageIndex ? 'done' : index === activeStageIndex ? 'active' : ''}>{index < activeStageIndex ? <Check size={12} /> : index + 1}{label}</span>)}</div><button className="button danger compact" onClick={() => void cancelBuild()}><X size={15} />取消构建</button></div>}
+        {apiError && <div className="api-error"><CircleHelp size={18} /><div><strong>构建失败</strong><p>{apiError}</p></div></div>}
         {analysis && <article className="analysis-result">
-          <div className="analysis-result-head"><span><Sparkles size={16} /></span><div><small>AI STUDY BRIEF · 已自动保存</small><h3>{analysis.title}</h3></div><Link className="button primary compact analysis-action" to={`/courses/${course.id}/replay`}>按路线学习 <ArrowRight size={14} /></Link></div>
+          <div className="analysis-result-head"><span><Sparkles size={16} /></span><div><small>AI STUDY BRIEF · 本小节已构建</small><h3>{analysis.title}</h3></div><Link className="button primary compact analysis-action" to={`/courses/${course.id}/sections/${section.id}/replay`}>按路线学习 <ArrowRight size={14} /></Link></div>
           <div className="analysis-study-grid">
-            <section className="analysis-summary-block"><span className="analysis-label"><BookOpen size={14} />本课摘要</span><p className={analysisExpanded ? 'expanded' : ''}>{analysis.summary}</p>{analysis.summary.length > 180 && <button className="analysis-toggle" onClick={() => setAnalysisExpanded((value) => !value)}>{analysisExpanded ? '收起摘要' : '展开完整摘要'} <ChevronDown size={13} /></button>}</section>
+            <section className="analysis-summary-block"><span className="analysis-label"><BookOpen size={14} />本节摘要</span><p className={analysisExpanded ? 'expanded' : ''}>{analysis.summary}</p>{analysis.summary.length > 180 && <button className="analysis-toggle" onClick={() => setAnalysisExpanded((value) => !value)}>{analysisExpanded ? '收起摘要' : '展开完整摘要'} <ChevronDown size={13} /></button>}</section>
             <section className="analysis-route-block"><span className="analysis-label"><Network size={14} />推荐学习路线</span><div className="analysis-path">{learningSteps.map((step, index) => <div key={`${step.title}-${index}`}><i>{index + 1}</i><span><strong>{step.title}</strong>{step.detail && <small>{step.detail}</small>}</span></div>)}</div></section>
           </div>
           {conceptLabels.length > 0 && <div className="analysis-concept-block"><span className="analysis-label"><Lightbulb size={14} />核心概念</span><div className="analysis-concepts">{conceptLabels.map((concept, index) => <span title={analysis.key_concepts[index]} key={`${concept}-${index}`}>{concept}</span>)}</div></div>}
         </article>}
         <div className="file-list">
-          {course.materials.map((material) => <div className="file-row" key={material.id}>
+          {section.materials.length === 0 && <div className="empty-hint">本小节还没有文件。点击上方“上传文件”添加课件后开始构建。</div>}
+          {section.materials.map((material) => <div className="file-row" key={material.id}>
             <span className={`file-type ${material.type.toLowerCase()}`}><FileText size={18} /></span>
             <div className="file-info"><strong>{material.name}</strong><span title={material.error}>{material.error || material.meta}</span></div>
             {material.previewUrl && <a className="file-preview-link" href={material.previewUrl} target="_blank" rel="noreferrer">查看文档</a>}
-            <div className={`status ${material.status}`}>{material.status === 'ready' ? <><CheckCircle2 size={15} />已就绪</> : material.status === 'failed' ? <><X size={14} />失败</> : material.status === 'cancelled' ? <><X size={14} />已取消</> : <><RefreshCw size={14} />AI 处理中{material.progress ? ` · ${material.progress}%` : ''}</>}</div>
+            <div className={`status ${material.status}`}>{material.status === 'ready' ? <><CheckCircle2 size={15} />已就绪</> : material.status === 'failed' ? <><X size={14} />失败</> : material.status === 'cancelled' ? <><X size={14} />已取消</> : material.status === 'pending' ? <><Clock3 size={14} />待构建</> : <><RefreshCw size={14} />构建中{material.progress ? ` · ${material.progress}%` : ''}</>}</div>
             <div className="material-menu-wrap">
               <button className="icon-button tiny" aria-label={`${material.name} 操作`} aria-expanded={openMaterialMenu === material.id} onClick={() => setOpenMaterialMenu((current) => current === material.id ? null : material.id)}><MoreHorizontal size={17} /></button>
               {openMaterialMenu === material.id && <div className="material-menu">
                 {material.previewUrl && <a href={material.previewUrl} target="_blank" rel="noreferrer"><FileText size={14} />查看文档</a>}
-                {material.status === 'processing' && <button onClick={() => void cancelProcessing()}><X size={14} />取消处理</button>}
-                <button className="delete" onClick={() => deleteMaterial(material.id)}><Trash2 size={14} />删除材料</button>
+                <button className="delete" onClick={() => removeMaterial(material.id)} disabled={building && material.status === 'processing'}><Trash2 size={14} />移除文件</button>
               </div>}
             </div>
           </div>)}
         </div>
       </section>
       <aside className="right-stack">
-        <section className="panel knowledge-preview"><div className="panel-kicker"><Network size={16} />知识路径</div><h3>{analysis ? `${learningSteps.length} 个学习阶段 · ${conceptLabels.length} 个概念` : '等待材料分析'}</h3><div className="mini-tree"><span className="tree-root">{analysis?.title || course.title}</span><i /><div>{(learningSteps.slice(0, 3).map((step) => step.title).length ? learningSteps.slice(0, 3).map((step) => step.title) : ['上传材料', 'AI 分析', '开始重放']).map((step, index) => <span title={analysis?.learning_path[index]} key={`${step}-${index}`} className={index === 0 && analysis ? 'active' : ''}>{step}</span>)}</div></div><Link to={`/courses/${course.id}/replay`} className="text-link">查看完整路径 <ArrowRight size={15} /></Link></section>
-        <section className="panel provider-note"><div className="provider-top"><span className="online-dot" />CheapRouter 视觉处理</div><p>图片与文档页面直接交给视觉模型，不执行 OCR；API Key 只保存在服务端。</p><Link to="/settings">查看配置</Link></section>
+        <section className="panel knowledge-preview"><div className="panel-kicker"><Network size={16} />本节讲稿</div><h3>{analysis ? `${section.knowledgeMap?.length || learningSteps.length} 个知识节点 · ${conceptLabels.length} 个概念` : '等待构建'}</h3><div className="mini-tree"><span className="tree-root">{analysis?.title || section.title}</span><i /><div>{(learningSteps.slice(0, 3).map((step) => step.title).length ? learningSteps.slice(0, 3).map((step) => step.title) : ['上传文件', '开始构建', '开始学习']).map((step, index) => <span title={analysis?.learning_path[index]} key={`${step}-${index}`} className={index === 0 && analysis ? 'active' : ''}>{step}</span>)}</div></div>{analysis ? <Link to={`/courses/${course.id}/sections/${section.id}/replay`} className="text-link">查看完整讲稿 <ArrowRight size={15} /></Link> : <span className="text-link muted">构建后可查看</span>}</section>
+        <section className="panel provider-note"><div className="provider-top"><span className="online-dot" />逐文件构建 · 内容隔离</div><p>每个小节只处理自己上传的文件，构建结果（讲稿、题目、聊天）不会与其它小节混用。图片与文档页面交给视觉模型，API Key 仅存服务端。</p><Link to="/settings">查看配置</Link></section>
       </aside>
     </div>
   </div>
 }
 
 function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses: Dispatch<SetStateAction<Course[]>>; notify: (message: string) => void }) {
-  const course = useCourse(courses)
-  const replayPageRef = useRef<HTMLDivElement>(null)
-  const chatScrollRef = useRef<HTMLDivElement>(null)
-  const askInputRef = useRef<HTMLTextAreaElement>(null)
+  const { courseId = '', sectionId = '' } = useParams()
+  const course = courses.find((item) => item.id === courseId)
+  const section = course?.sections.find((item) => item.id === sectionId)
   const [selected, setSelected] = useState('')
-  const [activeMaterialId, setActiveMaterialId] = useState('')
+  const [answer, setAnswer] = useState<string | null>(null)
+  const [submitted, setSubmitted] = useState(false)
+  const [mastery, setMastery] = useState(() => loadMastery(sectionId, section?.mastery ?? 0))
   const [chat, setChat] = useState('')
-  const [aiMinimized, setAiMinimized] = useState(false)
-  const [aiMenuOpen, setAiMenuOpen] = useState(false)
-  const [chatQuote, setChatQuote] = useState<string | null>(null)
   const [asking, setAsking] = useState(false)
-  const [selectionAsk, setSelectionAsk] = useState<{ text: string; left: number; top: number } | null>(null)
   const kmNodes = useMemo<KnowledgeNode[]>(() => {
-    if (course?.knowledgeMap?.length) return course.knowledgeMap
-    if (course?.analysis?.learning_path.length) return deriveKnowledgeMap(course.analysis)
-    return knowledgeNodes.map((node) => ({ id: node.id, title: node.title, tier: 'core' as KnowledgeTier, summary: node.eyebrow, content: `## ${node.title}\n\n上传并分析课程材料后，这里会生成结构化的学习内容。` }))
-  }, [course?.analysis, course?.knowledgeMap])
+    if (section?.knowledgeMap?.length) return section.knowledgeMap
+    if (section?.analysis?.learning_path.length) return deriveKnowledgeMap(section.analysis)
+    return knowledgeNodes.map((node) => ({ id: node.id, title: node.title, tier: 'core' as KnowledgeTier, summary: node.eyebrow, content: `## ${node.title}\n\n上传并构建本小节材料后，这里会生成结构化的学习内容。` }))
+  }, [section?.knowledgeMap, section?.analysis])
   const orderedNodes = useMemo(() => TIER_ORDER.flatMap((tier) => kmNodes.filter((node) => node.tier === tier)), [kmNodes])
-  const groupedNodes = useMemo(() => TIER_ORDER.map((tier) => ({ tier, nodes: kmNodes.filter((node) => node.tier === tier) })).filter((group) => group.nodes.length), [kmNodes])
-  const explorationNodes = course?.explorationNodes || []
-  const chatHistory = course?.chatHistory || []
-  const studyDialogs = course?.studyDialogs || []
-  const activeDialogId = course?.activeDialogId || 'main'
-  const activeDialog = studyDialogs.find((dialog) => dialog.id === activeDialogId)
-  const dialogMessages = chatHistory.filter((message) => (message.dialogId || 'main') === activeDialogId)
-  const latestDialogMessageId = dialogMessages[dialogMessages.length - 1]?.id
-  const isMainDialog = activeDialogId === 'main'
-  const previewMaterials = useMemo(() => course?.materials.filter((material) => material.previewUrl) || [], [course?.materials])
-  const activeMaterial = previewMaterials.find((material) => material.id === activeMaterialId) || previewMaterials[0]
+  const grouped = useMemo(() => TIER_ORDER.map((tier) => ({ tier, nodes: kmNodes.filter((node) => node.tier === tier) })).filter((group) => group.nodes.length), [kmNodes])
+  const explorationNodes = section?.explorationNodes || []
+  const chatHistory = section?.chatHistory || []
+
+  useEffect(() => {
+    if (orderedNodes.length && !orderedNodes.some((node) => node.id === selected) && !explorationNodes.some((node) => node.id === selected)) {
+      setSelected(orderedNodes[0].id)
+    }
+  }, [orderedNodes, explorationNodes, selected])
+
+  if (!course || !section) return <NotFound />
+
   const activeIndex = orderedNodes.findIndex((node) => node.id === selected)
   const activeKnowledge = kmNodes.find((node) => node.id === selected)
   const activeExploration = explorationNodes.find((node) => node.id === selected)
-  const explorationAnswer = activeExploration ? [...chatHistory].reverse().find((message) => message.role === 'assistant' && message.nodeId === activeExploration.id)?.content || '' : ''
+  const explorationAnswer = activeExploration ? (chatHistory.find((message) => message.role === 'assistant' && message.nodeId === activeExploration.id)?.content || '') : ''
   const activeContent = activeKnowledge ? activeKnowledge.content
-    : activeExploration ? `## ${activeExploration.title}\n\n> ❓ ${activeExploration.question}\n\n${explorationAnswer || '_正在生成回答…_'}`
-    : orderedNodes[0]?.content || '## 等待材料分析\n\n上传课件后将在这里生成结构化的学习内容。'
-  const currentTitle = activeKnowledge?.title || activeExploration?.title || orderedNodes[Math.max(activeIndex, 0)]?.title || course?.analysis?.title || course?.title || '课程'
+    : activeExploration ? `## ${activeExploration.title}\n\n> ❓ ${normalizeMarkdown(activeExploration.question)}\n\n${explorationAnswer ? normalizeMarkdown(explorationAnswer) : '_正在生成回答…_'}`
+    : (orderedNodes[0]?.content || '## 等待材料分析\n\n上传课件后将在这里生成结构化的学习内容。')
+  const currentTitle = activeKnowledge?.title || activeExploration?.title || orderedNodes[Math.max(activeIndex, 0)]?.title || section.analysis?.title || section.title
   const activeTier = activeKnowledge?.tier
   const tierLabel = activeKnowledge ? TIER_META[activeKnowledge.tier].label : activeExploration ? '探索支线' : '知识节点'
   const tierEyebrow = activeKnowledge ? TIER_META[activeKnowledge.tier].eyebrow : 'EXPLORATION'
   const progressPct = orderedNodes.length ? Math.max(8, ((Math.max(activeIndex, 0) + 1) / orderedNodes.length) * 100) : 8
-  const sourceLesson = useMemo(() => {
-    if (!course) return null
-    let nodeIndex = orderedNodes.findIndex((node) => node.id === selected)
-    if (nodeIndex < 0 && activeExploration) {
-      let parentId = activeExploration.parentId
-      for (let depth = 0; depth < 8 && nodeIndex < 0; depth += 1) {
-        nodeIndex = orderedNodes.findIndex((node) => node.id === parentId)
-        const parentBranch = explorationNodes.find((node) => node.id === parentId)
-        if (!parentBranch) break
-        parentId = parentBranch.parentId
-      }
+  const generatedQuestion = section.analysis?.review_questions[0]
+
+  const submitAnswer = () => {
+    if (!answer) return
+    setSubmitted(true)
+    if (section.analysis) {
+      const next = Math.min(100, mastery + 5)
+      setMastery(next)
+      saveMastery(section.id, next)
+      updateSection(setCourses, course.id, section.id, (current) => ({ ...current, mastery: next }))
+    } else if (answer === 'B' && mastery < 77) {
+      setMastery(77)
+      saveMastery(section.id, 77)
+      updateSection(setCourses, course.id, section.id, (current) => ({ ...current, mastery: 77 }))
     }
-    const safeIndex = Math.max(0, nodeIndex)
-    const section = course.analysis?.sections?.[safeIndex]
-    const totalPages = previewMaterials.reduce((total, material) => total + Math.max(1, material.pages || 1), 0)
-    const distributedPage = totalPages > 0
-      ? Math.floor((safeIndex / Math.max(1, orderedNodes.length)) * totalPages) + 1
-      : 1
-    let remainingPage = distributedPage
-    let fallbackMaterial = previewMaterials[0]
-    for (const material of previewMaterials) {
-      const pages = Math.max(1, material.pages || 1)
-      if (remainingPage <= pages) { fallbackMaterial = material; break }
-      remainingPage -= pages
-    }
-    const exactMaterial = section?.source_filename
-      ? previewMaterials.find((material) => material.name === section.source_filename)
-        || previewMaterials.find((material) => material.name.includes(section.source_filename) || section.source_filename.includes(material.name))
-      : undefined
-    const sourceMaterial = exactMaterial || fallbackMaterial
-    const sourcePage = Math.min(
-      Math.max(1, exactMaterial ? section?.source_page || 1 : remainingPage),
-      Math.max(1, sourceMaterial?.pages || 1),
-    )
-    return {
-      materialId: sourceMaterial?.id,
-      page: sourcePage,
-      isExactSource: Boolean(exactMaterial && section),
-    }
-  }, [activeExploration, course, explorationNodes, orderedNodes, previewMaterials, selected])
-  const activeSourcePage = activeMaterial?.id === sourceLesson?.materialId ? sourceLesson.page : 1
-  const activeSourceUrl = activeMaterial?.previewUrl
-    ? `${activeMaterial.previewUrl.split('#')[0]}#page=${activeSourcePage}&view=FitH`
-    : undefined
-
-  useEffect(() => {
-    const isKnownNode = orderedNodes.some((node) => node.id === selected)
-      || explorationNodes.some((node) => node.id === selected)
-    if (orderedNodes.length > 0 && !isKnownNode) setSelected(orderedNodes[0].id)
-  }, [explorationNodes, orderedNodes, selected])
-
-  useEffect(() => {
-    if (previewMaterials.length > 0 && !previewMaterials.some((material) => material.id === activeMaterialId)) setActiveMaterialId(previewMaterials[0].id)
-  }, [previewMaterials, activeMaterialId])
-
-  useEffect(() => {
-    if (sourceLesson?.materialId) setActiveMaterialId(sourceLesson.materialId)
-  }, [sourceLesson?.materialId, selected])
-
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      const scroller = chatScrollRef.current
-      if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' })
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [activeDialogId, aiMinimized, asking, latestDialogMessageId, explorationNodes.length])
-
-  useEffect(() => {
-    const dismissSelectionAsk = () => setSelectionAsk(null)
-    window.addEventListener('resize', dismissSelectionAsk)
-    window.addEventListener('scroll', dismissSelectionAsk, true)
-    return () => {
-      window.removeEventListener('resize', dismissSelectionAsk)
-      window.removeEventListener('scroll', dismissSelectionAsk, true)
-    }
-  }, [])
-
-  if (!course) return <NotFound />
-
-  const createDialog = () => {
-    const dialogId = `dialog-${Date.now()}`
-    const dialogNumber = studyDialogs.length + 1
-    setCourses((current) => current.map((item) => item.id === course.id ? {
-      ...item,
-      studyDialogs: [...(item.studyDialogs || []), { id: dialogId, title: `新对话 ${dialogNumber}`, createdAt: Date.now() }],
-      activeDialogId: dialogId,
-    } : item))
-    setChat('')
-    setChatQuote(null)
-    notify('已开启独立对话')
   }
-
-  const switchDialog = (dialogId: string) => {
-    setCourses((current) => current.map((item) => item.id === course.id ? { ...item, activeDialogId: dialogId } : item))
-    setChat('')
-    setChatQuote(null)
-  }
-
-  const captureTextSelection = () => {
-    requestAnimationFrame(() => {
-      const selection = window.getSelection()
-      const text = selection?.toString().replace(/\s+/g, ' ').trim() || ''
-      if (!selection || selection.rangeCount === 0 || text.length < 2) {
-        setSelectionAsk(null)
-        return
-      }
-      const range = selection.getRangeAt(0)
-      const ancestor = range.commonAncestorContainer instanceof Element
-        ? range.commonAncestorContainer
-        : range.commonAncestorContainer.parentElement
-      if (!ancestor || !replayPageRef.current?.contains(ancestor) || ancestor.closest('textarea, input, select, button')) {
-        setSelectionAsk(null)
-        return
-      }
-      const rect = range.getBoundingClientRect()
-      if (!rect.width && !rect.height) return
-      setSelectionAsk({
-        text: text.slice(0, 1600),
-        left: Math.min(window.innerWidth - 72, Math.max(72, rect.left + rect.width / 2)),
-        top: Math.max(12, rect.top - 44),
-      })
-    })
-  }
-
-  const quoteSelectionInChat = () => {
-    if (!selectionAsk) return
-    setAiMinimized(false)
-    setChatQuote(selectionAsk.text)
-    setSelectionAsk(null)
-    window.getSelection()?.removeAllRanges()
-    requestAnimationFrame(() => {
-      const input = askInputRef.current
-      input?.focus()
-      if (input) {
-        const end = input.value.length
-        input.setSelectionRange(end, end)
-      }
-    })
-  }
-
   const ask = async () => {
-    const prompt = chat.trim()
-    const selectedQuote = chatQuote?.trim() || ''
-    if ((!prompt && !selectedQuote) || asking) return
-    const visibleQuestion = prompt || '请解释这段选中内容'
-    const question = selectedQuote
-      ? `请结合以下选中内容回答。\n\n选中内容：\n${selectedQuote}\n\n用户问题：\n${visibleQuestion}`
-      : visibleQuestion
+    const question = chat.trim()
+    if (!question || asking) return
     const userMessageId = `message-${Date.now()}-user`
-    const courseId = course.id
-    const requestDialogId = activeDialogId
     const parentId = activeKnowledge ? selected : (activeExploration?.parentId || orderedNodes[0]?.id || 'course-root')
     setChat('')
-    setChatQuote(null)
     setAsking(true)
-    setCourses((current) => current.map((item) => item.id === courseId ? {
-      ...item,
-      studyDialogs: (item.studyDialogs || []).map((dialog) => dialog.id === requestDialogId && dialog.title.startsWith('新对话 ') ? { ...dialog, title: trimText(visibleQuestion, 14) } : dialog),
-      chatHistory: [...(item.chatHistory || []), { id: userMessageId, role: 'user' as const, content: visibleQuestion, quote: selectedQuote || undefined, dialogId: requestDialogId }],
-    } : item))
+    updateSection(setCourses, course.id, section.id, (current) => ({
+      ...current,
+      chatHistory: [...(current.chatHistory || []), { id: userMessageId, role: 'user' as const, content: question }],
+    }))
     try {
       const response = await fetch('/api/study/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           question,
-          course_title: course.title,
+          course_title: `${course.title} · ${section.title}`,
           current_topic: currentTitle,
-          summary: course.analysis?.summary || course.description,
-          learning_path: course.analysis?.learning_path || kmNodes.map((node) => node.title),
-          key_concepts: course.analysis?.key_concepts || course.tags,
+          summary: section.analysis?.summary || course.description,
+          learning_path: section.analysis?.learning_path || kmNodes.map((node) => node.title),
+          key_concepts: section.analysis?.key_concepts || course.tags,
           existing_nodes: [...kmNodes.map((node) => node.title), ...explorationNodes.map((node) => node.title)],
-          current_dialog_title: activeDialog?.title || '当前节点',
-          allow_new_dialog: requestDialogId === 'main',
         }),
       })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.detail || `AI 回答失败（HTTP ${response.status}）`)
-      const shouldCreateDialog = Boolean(payload.new_dialog) && requestDialogId === 'main'
-      const responseDialogId = shouldCreateDialog ? `dialog-${Date.now()}` : requestDialogId
-      const dialogTitle = trimText(payload.dialog_title || visibleQuestion, 14)
-      const nodeId = !shouldCreateDialog && payload.add_node && payload.node_title ? `branch-${Date.now()}` : undefined
-      setCourses((current) => current.map((item) => {
-        if (item.id !== courseId) return item
-        const movedHistory = shouldCreateDialog
-          ? (item.chatHistory || []).map((message) => message.id === userMessageId ? { ...message, dialogId: responseDialogId } : message)
-          : (item.chatHistory || [])
-        return {
-          ...item,
-          activeDialogId: shouldCreateDialog ? responseDialogId : item.activeDialogId,
-          studyDialogs: shouldCreateDialog
-            ? [...(item.studyDialogs || []), { id: responseDialogId, title: dialogTitle, createdAt: Date.now() }]
-            : item.studyDialogs,
-          explorationNodes: nodeId ? [...(item.explorationNodes || []), { id: nodeId, title: formatConceptLabel(payload.node_title), parentId, question: visibleQuestion }] : item.explorationNodes,
-          chatHistory: [...movedHistory, { id: `message-${Date.now()}-assistant`, role: 'assistant' as const, content: payload.answer || '我暂时无法回答这个问题。', nodeId, dialogId: responseDialogId }],
-        }
+      const nodeId = payload.add_node && payload.node_title ? `branch-${Date.now()}` : undefined
+      updateSection(setCourses, course.id, section.id, (current) => ({
+        ...current,
+        explorationNodes: nodeId ? [...(current.explorationNodes || []), { id: nodeId, title: formatConceptLabel(payload.node_title), parentId, question }] : current.explorationNodes,
+        chatHistory: [...(current.chatHistory || []), { id: `message-${Date.now()}-assistant`, role: 'assistant' as const, content: payload.answer || '我暂时无法回答这个问题。', nodeId }],
       }))
-      if (shouldCreateDialog) notify(`已将新话题移到独立对话「${dialogTitle}」`)
       if (nodeId) {
         setSelected(nodeId)
         notify(`拓扑图已新增：${formatConceptLabel(payload.node_title)}`)
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'AI 回答失败'
-      setCourses((current) => current.map((item) => item.id === courseId ? {
-        ...item,
-        chatHistory: [...(item.chatHistory || []), { id: `message-${Date.now()}-assistant`, role: 'assistant' as const, content: message, dialogId: requestDialogId }],
-      } : item))
+      updateSection(setCourses, course.id, section.id, (current) => ({
+        ...current,
+        chatHistory: [...(current.chatHistory || []), { id: `message-${Date.now()}-assistant`, role: 'assistant' as const, content: message }],
+      }))
     } finally {
       setAsking(false)
     }
   }
-  return <div className="replay-page" ref={replayPageRef} onMouseUp={captureTextSelection} onTouchEnd={captureTextSelection}>
-    {selectionAsk && <button className="selection-ask" style={{ left: selectionAsk.left, top: selectionAsk.top }} onMouseDown={(event) => event.preventDefault()} onClick={quoteSelectionInChat}><MessageSquareText size={14} />问 AI</button>}
-    <div className="replay-topbar"><Link to={`/courses/${course.id}`}><ArrowLeft size={16} />{course.title}</Link><div className="replay-location"><span>课堂重放</span><ChevronRight size={14} /><strong>{currentTitle}</strong></div><div className="replay-actions"><span className="saved"><Check size={14} />分析与进度已保存</span><button className="icon-button"><PanelLeftClose size={18} /></button></div></div>
-    <div className={`replay-grid ${aiMinimized ? 'ai-minimized' : ''}`}>
+  return <div className="replay-page">
+    <div className="replay-topbar"><Link to={`/courses/${course.id}/sections/${section.id}`}><ArrowLeft size={16} />{section.title}</Link><div className="replay-location"><span>{course.title}</span><ChevronRight size={14} /><strong>{currentTitle}</strong></div><div className="replay-actions"><span className="saved"><Check size={14} />分析与进度已保存</span><button className="icon-button"><PanelLeftClose size={18} /></button></div></div>
+    <div className="replay-grid">
       <aside className="path-column">
         <div className="path-head"><span className="eyebrow">LIVE KNOWLEDGE MAP</span><h2>课程知识拓扑</h2><div><span>{kmNodes.length} 个知识节点</span><span>{explorationNodes.length} 条探索支线</span></div><div className="thin-progress"><span style={{ width: `${progressPct}%` }} /></div></div>
         <div className="tier-scroll">
-          {groupedNodes.map((group) => <section className={`tier-group tier-${group.tier}`} key={group.tier}>
+          {grouped.map((group) => <section className={`tier-group tier-${group.tier}`} key={group.tier}>
             <header className="tier-label"><span className="tier-dot" /><div><small>{TIER_META[group.tier].eyebrow}</small><strong>{TIER_META[group.tier].label}</strong></div><span className="tier-count">{group.nodes.length}</span></header>
             <div className="tier-nodes">
               {group.nodes.map((node) => {
@@ -994,38 +768,63 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
       </aside>
 
       <section className="content-column">
-        <div className="content-toolbar"><div><span className={`tier-badge tier-${activeTier || 'branch'}`}>{tierLabel}</span><strong>{currentTitle}</strong></div><span>{activeMaterial?.name || (course.analysis ? '已完成分析' : '等待上传')}</span></div>
+        <div className="content-toolbar"><div><span className={`tier-badge tier-${activeTier || 'branch'}`}>{tierLabel}</span><strong>{currentTitle}</strong></div><span>{section.materials[0]?.name || (section.analysis ? '已完成构建' : '等待构建')}</span></div>
         <div className="reading-stage">
           <article className="reading-paper">
             <div className="reading-index"><span>{String(Math.max(activeIndex, 0) + 1).padStart(2, '0')}</span><em>{tierEyebrow} · 学习路径</em></div>
             <Markdown>{activeContent}</Markdown>
-            {activeMaterial?.previewUrl && <a className="reading-source-link" href={activeSourceUrl} target="_blank" rel="noreferrer"><LinkIcon size={15} /><span><small>对应原始材料</small><strong>{activeMaterial.name} · 第 {activeSourcePage} 页</strong></span><ArrowRight size={16} /></a>}
-            {sourceLesson?.isExactSource && <small className="source-confidence"><Check size={12} />AI 已记录该节点的原始页码</small>}
           </article>
         </div>
-        <div className="source-strip"><LinkIcon size={15} /><span>材料依据</span>{previewMaterials.length ? previewMaterials.map((material) => <button className={material.id === activeMaterial?.id ? 'active' : ''} key={material.id} onClick={() => setActiveMaterialId(material.id)}>{material.name}</button>) : course.materials.length ? course.materials.map((material) => <button key={material.id} onClick={() => notify(`材料：${material.name}`)}>{material.name}</button>) : <button onClick={() => notify('请先返回材料库上传并完成分析')}>暂无关联材料</button>}</div>
+        <div className="source-strip"><LinkIcon size={15} /><span>材料依据</span>{section.materials.length ? section.materials.map((material) => <button key={material.id} onClick={() => notify(`材料：${material.name}`)}>{material.name}</button>) : <button onClick={() => notify('请先返回小节上传并完成构建')}>暂无关联材料</button>}</div>
         <div className="content-nav"><button className="button ghost" onClick={() => activeIndex > 0 && setSelected(orderedNodes[activeIndex - 1].id)} disabled={activeIndex <= 0}><ArrowLeft size={16} />上一步</button><span>步骤 {Math.max(activeIndex + 1, 1)} / {orderedNodes.length}</span><button className="button dark" onClick={() => activeIndex > -1 && activeIndex < orderedNodes.length - 1 && setSelected(orderedNodes[activeIndex + 1].id)} disabled={activeIndex < 0 || activeIndex >= orderedNodes.length - 1}>继续：{orderedNodes[activeIndex + 1]?.title || '已到终点'} <ArrowRight size={16} /></button></div>
       </section>
 
-      {!aiMinimized && <aside className="ai-column">
-        <div className="ai-head"><div><span className="ai-avatar"><Bot size={19} /></span><div><strong>AI 讲师</strong><small><span className="online-dot" />{isMainDialog ? `基于 ${course.materials.filter((item) => item.status === 'ready').length} 份课程材料` : '独立话题'}</small></div></div><div className="dialog-controls"><select aria-label="切换对话" value={activeDialogId} disabled={asking} onChange={(event) => switchDialog(event.target.value)}><option value="main">当前节点</option>{studyDialogs.map((dialog) => <option key={dialog.id} value={dialog.id}>{dialog.title}</option>)}</select><button type="button" disabled={asking} onClick={createDialog} title="开启新对话"><Plus size={14} /><span>新对话</span></button><div className="ai-head-actions"><button type="button" aria-label="AI 讲师更多选项" aria-expanded={aiMenuOpen} aria-haspopup="menu" className="icon-button tiny more-button" onClick={() => setAiMenuOpen((open) => !open)}><MoreHorizontal size={17} /></button>{aiMenuOpen && <div className="ai-action-menu" role="menu"><button type="button" role="menuitem" onClick={() => { setAiMenuOpen(false); setAiMinimized(true) }}><PanelLeftClose size={14} />最小化</button></div>}</div></div></div>
-        <div className="chat-scroll" ref={chatScrollRef}>
-          {isMainDialog && <div className="ai-message teacher-intro">
-            <p>我们一起学习 <strong>{currentTitle}</strong>。</p>
-            <p>哪里不理解，直接问我。也可以选中内容引用提问，我会结合课程材料帮你讲清楚。</p>
-          </div>}
-          {!isMainDialog && dialogMessages.length === 0 && <div className="dialog-empty"><span><MessageSquareText size={20} /></span><strong>{activeDialog?.title || '新对话'}</strong><p>这是一个独立话题，不会混入上面的节点问答。直接输入你的问题即可。</p></div>}
-          {dialogMessages.map((message) => message.role === 'user' ? <div className={`user-message ${message.quote ? 'with-quote' : ''}`} key={message.id}>{message.quote && <div className="message-selection"><span><MessageSquareText size={12} />Selection</span><p>{message.quote}</p></div>}<div className="user-prompt">{message.content}</div></div> : <div className="ai-message compact-message" key={message.id}><Markdown>{message.content}</Markdown>{message.nodeId && <button className="topology-jump" onClick={() => setSelected(message.nodeId!)}><GitBranchIcon />已加入拓扑图 · 点击定位</button>}</div>)}
+      <aside className="ai-column">
+        <div className="ai-head"><div><span className="ai-avatar"><Bot size={19} /></span><div><strong>AI 讲师</strong><small><span className="online-dot" />基于本小节 {section.materials.filter((item) => item.status === 'ready').length} 份材料</small></div></div><button className="icon-button tiny"><MoreHorizontal size={17} /></button></div>
+        <div className="chat-scroll">
+          <div className="ai-message">{section.analysis ? <Markdown className="on-dark">{normalizeMarkdown(trimText(section.analysis.summary, 320))}</Markdown> : <p>观察这个卡诺图。橙色圈跨过了左右边界——因为卡诺图的列按 <strong>00、01、11、10</strong> 排列，首尾依然只相差一个变量。</p>}<div className="citation-row">{section.materials.slice(0, 2).map((material, index) => <button key={material.id}>[{index + 1}] {material.name}</button>)}</div></div>
+          <div className="ai-message question-card"><span className="question-type">理解检验 · {generatedQuestion ? '基于材料' : '单选题'}</span><div className="q-text"><Markdown className="on-dark">{normalizeMarkdown(generatedQuestion || '为什么卡诺图中最左列与最右列可以视为相邻？')}</Markdown></div>{generatedQuestion ? <textarea className="review-answer" value={answer || ''} disabled={submitted} onChange={(event) => setAnswer(event.target.value)} placeholder="根据刚才看到的材料写下你的理解…" /> : <div className="answer-list">
+            {[['A','它们在图形位置上最近'],['B','格雷码顺序使它们仅有一位变量不同'],['C','所有边界上的格子都彼此相邻'],['D','这是为了让化简结果更短']].map(([key, value]) => <button key={key} disabled={submitted} onClick={() => setAnswer(key)} className={`${answer === key ? 'selected' : ''} ${submitted && key === 'B' ? 'correct' : ''} ${submitted && answer === key && key !== 'B' ? 'wrong' : ''}`}><span>{key}</span>{value}{submitted && key === 'B' && <CheckCircle2 size={16} />}</button>)}
+          </div>}<button className="button primary full" disabled={!answer?.trim() || submitted} onClick={submitAnswer}>{submitted ? '回答已保存' : '提交回答'}</button></div>
+          {submitted && <div className="feedback-card"><div className="feedback-title"><CheckCircle2 size={18} /><strong>{generatedQuestion ? '回答已记录到当前学习进度' : answer === 'B' ? '回答正确，而且理由匹配' : '再看一下格雷码的排列规则'}</strong><span>{generatedQuestion ? '+5%' : answer === 'B' ? '+15%' : '-8%'}</span></div><p>{generatedQuestion ? '这是根据你上传材料生成的开放题；可以继续向 AI 讲师追问并补充答案。' : answer === 'B' ? '这说明你理解了“逻辑相邻”而不是根据图形位置猜测。' : '边界相邻的关键不是物理距离，而是只有一位变量发生变化。'}</p><div className="mastery-change"><span>本知识点掌握度</span><div><i style={{ width: `${mastery}%` }} /></div><strong>{mastery}%</strong></div><div className="feedback-actions"><button onClick={() => setChat(`为什么“${currentTitle}”是这样？`)}>为什么？深入解释</button><button onClick={() => setChat(`学习“${currentTitle}”前需要补什么基础？`)}>补充前置知识</button></div></div>}
+          {chatHistory.map((message) => message.role === 'user' ? <div className="user-message" key={message.id}>{message.content}</div> : <div className="ai-message compact-message" key={message.id}><Markdown className="on-dark">{normalizeMarkdown(message.content)}</Markdown>{message.nodeId && <button className="topology-jump" onClick={() => setSelected(message.nodeId!)}><GitBranchIcon />已加入拓扑图 · 点击定位</button>}</div>)}
           {asking && <div className="ai-message compact-message thinking-message"><span className="mini-spinner" /><p>正在结合当前节点判断是否需要扩展知识拓扑…</p></div>}
         </div>
-        <div className="ask-box"><div className="quick-prompts"><button onClick={() => setChat(`换一个类比解释“${currentTitle}”`)}>换个类比</button><button onClick={() => setChat(`基于“${currentTitle}”给我一道变式题`)}>来道变式</button><button onClick={() => setChat(`学习“${currentTitle}”前需要补什么基础？`)}>探索前置知识</button></div><div className={`ask-input ${chatQuote ? 'has-selection' : ''}`}>{chatQuote && <div className="composer-selection"><div><p>{chatQuote}</p><span><MessageSquareText size={12} />Selection</span></div><button type="button" aria-label="移除引用" title="移除引用" onClick={() => setChatQuote(null)}><X size={14} /></button></div>}<div className="composer-entry"><textarea ref={askInputRef} value={chat} disabled={asking} onChange={(e) => setChat(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void ask() } }} placeholder={chatQuote ? '询问关于所选内容的问题…' : isMainDialog ? '针对当前节点追问；也可以选中文字直接问 AI…' : '输入这个独立话题的问题…'} /><button className="composer-send" onClick={() => void ask()} disabled={(!chat.trim() && !chatQuote) || asking}>{asking ? <RefreshCw className="spin-icon" size={16} /> : <ArrowRight size={18} />}</button></div></div><small>{isMainDialog ? '选中文字可引用提问；AI 会判断是否扩展拓扑' : '当前对话与节点问答分开保存'}</small></div>
-      </aside>}
+        <div className="ask-box"><div className="quick-prompts"><button onClick={() => setChat(`换一个类比解释“${currentTitle}”`)}>换个类比</button><button onClick={() => setChat(`基于“${currentTitle}”给我一道变式题`)}>来道变式</button><button onClick={() => setChat(`学习“${currentTitle}”前需要补什么基础？`)}>探索前置知识</button></div><div className="ask-input"><textarea value={chat} disabled={asking} onChange={(e) => setChat(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void ask() } }} placeholder="针对当前节点追问；必要时会自动扩展左侧拓扑…" /><button onClick={() => void ask()} disabled={!chat.trim() || asking}>{asking ? <RefreshCw className="spin-icon" size={16} /> : <Send size={17} />}</button></div><small>AI 会判断问题是否值得成为新的知识节点</small></div>
+      </aside>
     </div>
-    {aiMinimized && <button type="button" className="ai-restore-button" aria-label="恢复 AI 讲师" title="恢复 AI 讲师" onClick={() => setAiMinimized(false)}><Bot size={22} /></button>}
   </div>
 }
 
 function GitBranchIcon() { return <Network size={14} /> }
+
+function Review({ courses, notify }: { courses: Course[]; notify: (message: string) => void }) {
+  const { course, section } = useSection(courses)
+  const [tab, setTab] = useState<'quiz' | 'sheet'>('quiz')
+  const [generated, setGenerated] = useState(false)
+  if (!course || !section) return <NotFound />
+  const analysis = section.analysis
+  const recommendedConcepts = analysis?.key_concepts.slice(0, 3).map(formatConceptLabel) || ['卡诺图边界相邻', '最小项表达', '竞争与冒险']
+  return <div className="page"><div className="back-row"><Link to={`/courses/${course.id}/sections/${section.id}`}><ArrowLeft size={16} />{section.title}</Link></div><PageHeader title="复习工坊" subtitle="把薄弱点、错题和必会知识组合成一次高效复习。" actions={<button className="button primary" onClick={() => { setGenerated(true); notify(tab === 'quiz' ? '已根据本小节材料生成复习题' : 'Cheatsheet 已生成') }}><Sparkles size={17} />立即生成</button>} /><SectionSubnav courseId={course.id} sectionId={section.id} />
+    <div className="review-layout"><section className="panel builder-panel"><div className="mode-switch"><button onClick={() => { setTab('quiz'); setGenerated(false) }} className={tab === 'quiz' ? 'active' : ''}><ListChecks size={18} />复习题单</button><button onClick={() => { setTab('sheet'); setGenerated(false) }} className={tab === 'sheet' ? 'active' : ''}><FileText size={18} />一页 Cheatsheet</button></div><div className="builder-copy"><span className="pill amber"><Sparkles size={13} />{analysis ? '根据本小节材料推荐' : '根据你的学习记录推荐'}</span><h2>{tab === 'quiz' ? '生成一次 20 分钟的针对性练习' : '生成一页纸核心知识总结'}</h2><p>{analysis ? trimText(analysis.summary, 220) : (tab === 'quiz' ? '系统会提高薄弱知识点与历史错题的出现权重。' : '浓缩核心定义、公式、知识联系与易错点，并保留来源引用。')}</p></div><div className="form-grid"><label>知识范围<select><option>{analysis?.title || '当前小节'}</option><option>整门课程</option><option>仅薄弱知识点</option></select></label><label>{tab === 'quiz' ? '复习时长' : '内容密度'}<select><option>{tab === 'quiz' ? `材料题 · ${analysis?.review_questions.length || 12} 题` : '标准 · 一页 A4'}</option><option>{tab === 'quiz' ? '10 分钟 · 精简模式' : '精简 · 只保留必会项'}</option></select></label><label>难度<select><option>自适应</option><option>基础巩固</option><option>考试挑战</option></select></label><label>内容侧重<select><option>薄弱点优先</option><option>平均覆盖</option><option>错题优先</option></select></label></div><div className="recommend-row"><span><Target size={16} />将重点覆盖</span>{recommendedConcepts.map((concept, index) => <button key={`${concept}-${index}`}>{concept}</button>)}</div></section>
+      <aside className={`panel artifact-preview ${generated ? 'generated' : ''}`}>{generated ? tab === 'quiz' ? <QuizPreview questions={analysis?.review_questions} title={analysis?.title} /> : <SheetPreview analysis={analysis} materialCount={section.materials.length} /> : <><span className="artifact-icon">{tab === 'quiz' ? <ListChecks size={30} /> : <FileText size={30} />}</span><h3>生成内容将在这里预览</h3><p>{analysis ? '内容将直接使用本小节已构建的分析结果。' : '上传材料并完成构建后，可根据知识路径继续生成复习内容。'}</p></>}</aside></div>
+  </div>
+}
+
+function QuizPreview({ questions, title }: { questions?: string[]; title?: string }) { const items = questions?.length ? questions : ['一个四变量卡诺图中，位于四个角的最小项能否合并？']; return <div className="quiz-preview"><div className="preview-head"><span>已生成 · 来自课程材料</span><strong>{title || '期中针对性复习'}</strong><small>{items.length} 题 · AI 分析结果已保存</small></div>{items.slice(0, 3).map((question, index) => <div className="preview-question generated-question" key={`${question}-${index}`}><span>{String(index + 1).padStart(2, '0')} · 开放题</span><Markdown>{normalizeMarkdown(question)}</Markdown></div>)}<button className="button dark full">开始答题 <ArrowRight size={16} /></button></div> }
+
+function SheetPreview({ analysis, materialCount }: { analysis?: CourseAnalysis; materialCount: number }) { return <div className="sheet-preview"><div className="preview-head"><span>CHEATSHEET · 已保存分析</span><strong>{analysis?.title || '逻辑函数化简'}</strong><small>基于 {materialCount} 份课程材料</small></div><h4>01 · 内容摘要</h4><Markdown>{analysis ? normalizeMarkdown(trimText(analysis.summary, 480)) : '相邻最小项只有一个变量取值不同，合并后可消去该变量。'}</Markdown><h4>02 · 核心概念</h4><div className="analysis-concepts">{(analysis?.key_concepts.map(formatConceptLabel) || ['相邻项', '格雷码', '函数化简']).map((concept, index) => <span key={`${concept}-${index}`}>{concept}</span>)}</div><h4>03 · 学习路径</h4><p>{(analysis?.learning_path.map((step) => formatLearningStep(step).title) || ['理解概念', '跟随例题', '完成检验']).join(' → ')}</p></div> }
+
+function Progress({ courses }: { courses: Course[] }) {
+  const { course, section } = useSection(courses)
+  const mastery = loadMastery(section?.id || '', section?.mastery ?? 0)
+  if (!course || !section) return <NotFound />
+  const analysis = section.analysis
+  const bars = [42, 48, 45, 54, 61, 68, mastery]
+  const progressNodes = analysis?.learning_path.length ? analysis.learning_path.map((step, index) => ({ id: `analysis-${index}`, title: formatLearningStep(step).title, mastery: index === 0 ? mastery : Math.max(0, mastery - index * 12) })) : knowledgeNodes
+  const weakConcepts = analysis?.key_concepts.slice(0, 2).map(formatConceptLabel) || ['卡诺图边界相邻', '最小项标准形式']
+  return <div className="page"><div className="back-row"><Link to={`/courses/${course.id}/sections/${section.id}`}><ArrowLeft size={16} />{section.title}</Link></div><PageHeader title="我的学习" subtitle="看见每一次真正理解，也看见下一步该往哪里走。" /><SectionSubnav courseId={course.id} sectionId={section.id} /><section className="progress-hero"><div><span className="eyebrow">OVERALL MASTERY</span><strong>{mastery}%</strong><p>本小节掌握度 · 最近 7 天提升 15%</p></div><div className="trend-chart">{bars.map((bar, index) => <span key={index} style={{ height: `${bar}%` }}><i>{index === bars.length - 1 ? `${bar}%` : ''}</i></span>)}</div><div className="streak"><span><Zap size={18} /></span><strong>7 天</strong><small>连续学习</small></div></section><div className="progress-grid"><section className="panel"><div className="section-heading compact"><div><h2>{analysis ? '材料学习路径' : '知识点掌握'}</h2><p>{analysis ? '来自本小节已保存的 AI 分析' : '按优先级排序'}</p></div></div><div className="mastery-list">{progressNodes.map((node) => <div key={node.id}><span>{node.title}<small>{node.mastery >= 75 ? '已掌握' : node.mastery > 0 ? '继续巩固' : '待学习'}</small></span><div><i style={{ width: `${node.mastery}%` }} /></div><strong>{node.mastery}%</strong></div>)}</div></section><section className="panel weakness-panel"><div className="section-heading compact"><div><h2>优先补强</h2><p>{analysis ? '来自材料关键概念' : '来自错题与探索记录'}</p></div></div>{weakConcepts.map((concept, index) => <div className="weak-item" key={`${concept}-${index}`}><span className={`priority ${index === 0 ? 'high' : 'mid'}`}>{index === 0 ? '高' : '中'}</span><div><strong>{concept}</strong><p>{analysis ? '建议在课堂重放中结合原文查看' : '来自历史学习记录'}</p></div><Link to={`/courses/${course.id}/sections/${section.id}/replay`}>去复习</Link></div>)}<div className="branch-summary"><Network size={18} /><div><strong>{analysis?.learning_path.length || 3} 个学习阶段</strong><p>学习内容已和本小节材料关联。</p></div></div></section></div></div>
+}
 
 function SettingsPage({ notify }: { notify: (message: string) => void }) {
   const [checking, setChecking] = useState(false)

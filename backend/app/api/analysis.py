@@ -47,6 +47,11 @@ class VisualJob:
     result: VisualProcessResponse | None = None
     work_dir: Path | None = None
     preview_paths: dict[int, Path] | None = None
+    files_total: int = 0
+    files_done: int = 0
+    current_file: str | None = None
+    pages_total: int = 0
+    pages_done: int = 0
 
 
 jobs: dict[str, VisualJob] = {}
@@ -62,6 +67,11 @@ def _status(job: VisualJob) -> VisualJobStatus:
         message=job.message,
         error=job.error,
         result=job.result,
+        files_total=job.files_total,
+        files_done=job.files_done,
+        current_file=job.current_file,
+        pages_total=job.pages_total,
+        pages_done=job.pages_done,
     )
 
 
@@ -111,24 +121,34 @@ async def _run_visual_job(job: VisualJob, stored_files: list[tuple[Path, str]]) 
     try:
         job.status = "running"
         total = max(len(stored_files), 1)
+        job.files_total = len(stored_files)
         for index, (stored_path, safe_name) in enumerate(stored_files):
             job.stage = "rendering"
+            job.files_done = index
+            job.current_file = safe_name
             job.progress = 18 + round(index / total * 35)
-            job.message = f"正在准备 {safe_name} 的完整页面"
-            prepared.append(
-                await asyncio.to_thread(
-                    prepare_visual_document,
-                    stored_path,
-                    safe_name,
-                    job.work_dir or stored_path.parent,
-                    settings,
-                )
+            job.message = f"正在逐页渲染 {safe_name}（第 {index + 1}/{job.files_total} 个文件）"
+            document = await asyncio.to_thread(
+                prepare_visual_document,
+                stored_path,
+                safe_name,
+                job.work_dir or stored_path.parent,
+                settings,
             )
+            prepared.append(document)
+            job.pages_done += document.pages
+            job.message = f"已渲染 {safe_name} · {document.pages} 页（累计 {job.pages_done} 页）"
             await asyncio.sleep(0)
+
+        job.files_done = job.files_total
+        job.current_file = None
+        total_pages = sum(item.pages for item in prepared)
+        job.pages_total = total_pages
+        job.pages_done = total_pages
 
         job.stage = "model"
         job.progress = 58
-        job.message = f"正在将 {sum(item.pages for item in prepared)} 个页面交给视觉模型"
+        job.message = f"AI 正在逐文件分析 {len(prepared)} 个文件共 {total_pages} 页"
         analysis, usage = await analyze_materials(prepared, AIProvider(settings))
 
         job.stage = "finalizing"

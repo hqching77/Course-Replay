@@ -65,6 +65,7 @@ class AIProvider:
         content: list[dict[str, Any]],
         *,
         system_prompt: str,
+        max_tokens: int = 8000,
     ) -> tuple[str, dict[str, Any] | None]:
         client, model = self._require_chat_config()
         try:
@@ -74,8 +75,8 @@ class AIProvider:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": content},
                 ],  # type: ignore[arg-type]
-                temperature=0.2,
-                max_tokens=1600,
+                temperature=0.3,
+                max_tokens=max_tokens,
             )
         except (APIConnectionError, APITimeoutError, APIStatusError) as exc:
             self._raise_friendly_error(exc)
