@@ -8,6 +8,14 @@ export interface CourseAnalysis {
   review_questions: string[]
 }
 
+export interface ProcessingJob {
+  jobId: string
+  materialIds: string[]
+  progress: number
+  stage: string
+  message: string
+}
+
 export interface Material {
   id: string
   name: string
@@ -32,6 +40,7 @@ export interface Course {
   accent: string
   analysis?: CourseAnalysis
   analysisJobId?: string
+  processingJob?: ProcessingJob
 }
 
 export const defaultCourses: Course[] = [

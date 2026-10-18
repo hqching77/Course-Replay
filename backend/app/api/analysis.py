@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -34,6 +35,8 @@ JobState = Literal["queued", "running", "completed", "failed", "cancelled"]
 @dataclass
 class VisualJob:
     job_id: str
+    filenames: list[str] = field(default_factory=list)
+    created_at: float = field(default_factory=time.time)
     status: JobState = "queued"
     stage: str = "queued"
     progress: int = 8
@@ -83,6 +86,7 @@ def _load_completed_job(job_id: str) -> VisualJob | None:
             preview_paths[index] = candidate
     job = VisualJob(
         job_id=normalized_id,
+        filenames=[document.filename for document in result.documents],
         status="completed",
         stage="completed",
         progress=100,
@@ -204,10 +208,25 @@ async def start_visual_processing(files: list[UploadFile] = File(...)) -> Visual
         for upload in files:
             await upload.close()
 
-    job = VisualJob(job_id=job_id, work_dir=work_dir)
+    job = VisualJob(job_id=job_id, filenames=[safe_name for _, safe_name in stored_files], work_dir=work_dir)
     jobs[job_id] = job
     tasks[job_id] = asyncio.create_task(_run_visual_job(job, stored_files))
     return VisualJobStartResponse(job_id=job_id)
+
+
+@router.get("/process")
+def list_visual_jobs() -> list[dict[str, object]]:
+    return [
+        {
+            "job_id": job.job_id,
+            "status": job.status,
+            "stage": job.stage,
+            "progress": job.progress,
+            "message": job.message,
+            "filenames": job.filenames,
+        }
+        for job in sorted(jobs.values(), key=lambda item: item.created_at, reverse=True)
+    ]
 
 
 @router.get("/process/{job_id}", response_model=VisualJobStatus)

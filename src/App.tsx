@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { Dispatch, FormEvent, ReactNode, SetStateAction, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
@@ -33,6 +33,7 @@ import {
   Settings,
   Sparkles,
   Target,
+  Trash2,
   UploadCloud,
   X,
   Zap,
@@ -41,6 +42,37 @@ import { Link, NavLink, Route, Routes, useLocation, useNavigate, useParams } fro
 import { Course, CourseAnalysis, knowledgeNodes, loadCourses, loadMastery, saveCourses, saveMastery } from './data'
 
 type Notice = { id: number; message: string }
+
+function trimText(value: string, limit: number) {
+  const clean = value.replace(/\s+/g, ' ').trim()
+  return clean.length > limit ? `${clean.slice(0, limit).trim()}…` : clean
+}
+
+function formatLearningStep(value: string) {
+  const clean = value.replace(/^\s*(?:第?\d+[.、)）:]|[-*•])\s*/, '').replace(/\s+/g, ' ').trim()
+  const separator = clean.search(/[：:。；;]/)
+  const rawTitle = separator > 0 ? clean.slice(0, separator) : clean
+  const rawDetail = separator > 0 ? clean.slice(separator + 1) : ''
+  return {
+    title: trimText(rawTitle, 34),
+    detail: trimText(rawDetail, 86),
+  }
+}
+
+function formatConceptLabel(value: string) {
+  const clean = value.replace(/^\s*(?:\d+[.、)）:]|[-*•])\s*/, '').trim()
+  return trimText(clean.split(/[：:。；;]/)[0] || clean, 18)
+}
+
+function courseSubtitle(course: Course) {
+  const description = course.description.trim()
+  const analysisWasCopiedIntoDescription = Boolean(course.analysis && description === course.analysis.summary.trim())
+  if (analysisWasCopiedIntoDescription || description.length > 180) {
+    const readyCount = course.materials.filter((material) => material.status === 'ready').length
+    return `已整理 ${readyCount} 份课程材料 · ${course.analysis?.learning_path.length || 0} 个学习阶段 · 随时开始重放`
+  }
+  return description
+}
 
 function App() {
   const [courses, setCourses] = useState<Course[]>(loadCourses)
@@ -197,8 +229,8 @@ function CourseCard({ course }: { course: Course }) {
   return (
     <Link to={`/courses/${course.id}`} className="course-card">
       <div className="course-card-top"><span className="course-swatch" style={{ background: course.accent }} /><button className="icon-button tiny" onClick={(event) => event.preventDefault()}><MoreHorizontal size={16} /></button></div>
-      <div className="course-code">{course.code}</div><h3>{course.title}</h3><p>{course.description}</p>
-      <div className="tag-row">{course.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
+      <div className="course-code">{course.code}</div><h3>{course.title}</h3><p>{courseSubtitle(course)}</p>
+      <div className="tag-row">{course.tags.map((tag, index) => <span key={`${tag}-${index}`} title={tag}>{formatConceptLabel(tag)}</span>)}</div>
       <div className="card-divider" />
       <div className="course-footer"><div><span>{course.materials.length} 份材料</span><small>最近学习 {course.updated}</small></div><div className="ring" style={{ '--value': `${displayedMastery * 3.6}deg`, '--accent': course.accent } as React.CSSProperties}><span>{displayedMastery}%</span></div></div>
     </Link>
@@ -230,126 +262,214 @@ function CourseSubnav({ course }: { course: Course }) {
   return <div className="course-subnav"><NavLink end to={`/courses/${course.id}`}>材料库</NavLink><NavLink to={`/courses/${course.id}/replay`}>课堂重放</NavLink><NavLink to={`/courses/${course.id}/review`}>复习工坊</NavLink><NavLink to={`/courses/${course.id}/progress`}>学习记录</NavLink></div>
 }
 
-function CourseDetail({ courses, setCourses, notify }: { courses: Course[]; setCourses: (courses: Course[]) => void; notify: (message: string) => void }) {
+function CourseDetail({ courses, setCourses, notify }: { courses: Course[]; setCourses: Dispatch<SetStateAction<Course[]>>; notify: (message: string) => void }) {
   const course = useCourse(courses)
   const inputRef = useRef<HTMLInputElement>(null)
-  const requestControllerRef = useRef<AbortController | null>(null)
-  const jobIdRef = useRef<string | null>(null)
-  const activeMaterialIdsRef = useRef<string[]>([])
-  const cancelledRef = useRef(false)
-  const [processing, setProcessing] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [processingStage, setProcessingStage] = useState('等待上传')
-  const [stageKey, setStageKey] = useState('uploading')
+  const uploadControllerRef = useRef<AbortController | null>(null)
+  const uploadMaterialIdsRef = useRef<string[]>([])
+  const recoveryAttemptedRef = useRef('')
+  const [uploading, setUploading] = useState(false)
+  const [uploadMessage, setUploadMessage] = useState('正在上传课堂材料')
   const [apiError, setApiError] = useState('')
+  const [openMaterialMenu, setOpenMaterialMenu] = useState<string | null>(null)
+  const [analysisExpanded, setAnalysisExpanded] = useState(false)
+  const courseId = course?.id
+  const processingJob = course?.processingJob
+  const orphanMaterials = course?.materials.filter((material) => material.status === 'processing') || []
+  const orphanSignature = orphanMaterials.map((material) => material.id).join('|')
+
+  useEffect(() => {
+    if (!courseId || uploading || processingJob || !orphanMaterials.length) return
+    const signature = `${courseId}:${orphanSignature}`
+    if (recoveryAttemptedRef.current === signature) return
+    recoveryAttemptedRef.current = signature
+    let active = true
+
+    const recover = async () => {
+      try {
+        const response = await fetch('/api/process')
+        if (!response.ok) throw new Error('无法读取后台任务')
+        const jobs = await response.json() as { job_id: string; status: string; stage: string; progress: number; message: string; filenames: string[] }[]
+        if (!active) return
+        const names = new Set(orphanMaterials.map((material) => material.name))
+        const match = jobs.find((job) => ['queued', 'running'].includes(job.status) && job.filenames.some((name) => names.has(name)))
+        if (match) {
+          const materialIds = orphanMaterials.filter((material) => match.filenames.includes(material.name)).map((material) => material.id)
+          setCourses((current) => current.map((item) => item.id === courseId && !item.processingJob ? {
+            ...item,
+            processingJob: { jobId: match.job_id, materialIds, progress: match.progress, stage: match.stage, message: match.message },
+          } : item))
+          return
+        }
+        const orphanIds = new Set(orphanMaterials.map((material) => material.id))
+        setCourses((current) => current.map((item) => item.id === courseId && !item.processingJob ? {
+          ...item,
+          materials: item.materials.map((material) => orphanIds.has(material.id) ? { ...material, status: 'failed' as const, error: '处理任务已中断，请重新上传' } : material),
+        } : item))
+      } catch {
+        recoveryAttemptedRef.current = ''
+      }
+    }
+
+    void recover()
+    return () => { active = false }
+  }, [courseId, orphanSignature, processingJob, setCourses, uploading])
+
+  useEffect(() => {
+    if (!courseId || !processingJob?.jobId) return
+    let active = true
+    const controller = new AbortController()
+    const jobId = processingJob.jobId
+    const materialIds = processingJob.materialIds
+
+    const failJob = (message: string) => {
+      if (!active) return
+      setApiError(message)
+      setCourses((current) => current.map((item) => item.id === courseId && item.processingJob?.jobId === jobId ? {
+        ...item,
+        processingJob: undefined,
+        materials: item.materials.map((material) => materialIds.includes(material.id) ? { ...material, status: 'failed' as const, error: message } : material),
+      } : item))
+    }
+
+    const poll = async () => {
+      while (active) {
+        try {
+          const response = await fetch(`/api/process/${jobId}`, { signal: controller.signal })
+          const job = await response.json().catch(() => ({}))
+          if (!response.ok) throw new Error(job.detail || `读取任务状态失败（HTTP ${response.status}）`)
+          if (!active) return
+
+          setCourses((current) => current.map((item) => item.id === courseId && item.processingJob?.jobId === jobId ? {
+            ...item,
+            processingJob: { ...item.processingJob!, progress: job.progress || 0, stage: job.stage || 'queued', message: job.message || '正在处理材料' },
+            materials: item.materials.map((material) => materialIds.includes(material.id) ? { ...material, progress: job.progress || 0 } : material),
+          } : item))
+
+          if (job.status === 'completed' && job.result) {
+            const payload = job.result as {
+              analysis: CourseAnalysis
+              model: string
+              documents: { filename: string; pages: number; processing: string; preview_url: string }[]
+            }
+            setCourses((current) => current.map((item) => item.id === courseId && item.processingJob?.jobId === jobId ? {
+              ...item,
+              processingJob: undefined,
+              analysis: payload.analysis,
+              analysisJobId: jobId,
+              tags: payload.analysis.key_concepts.slice(0, 3).map(formatConceptLabel),
+              materials: item.materials.map((material) => {
+                if (!materialIds.includes(material.id)) return material
+                const materialIndex = materialIds.indexOf(material.id)
+                const document = payload.documents[materialIndex] || payload.documents.find((entry) => entry.filename === material.name)
+                return {
+                  ...material,
+                  status: 'ready' as const,
+                  error: undefined,
+                  progress: 100,
+                  pages: document?.pages,
+                  previewUrl: document?.preview_url,
+                  meta: document ? `${document.pages} 页 · ${document.processing}` : material.meta,
+                }
+              }),
+            } : item))
+            setApiError('')
+            notify(`材料处理完成，已由 ${payload.model} 生成学习路径`)
+            return
+          }
+          if (job.status === 'failed') return failJob(job.error || job.message || '材料处理失败')
+          if (job.status === 'cancelled') return failJob('处理任务已取消')
+          await new Promise((resolve) => window.setTimeout(resolve, 900))
+        } catch (error) {
+          if (!active || (error instanceof DOMException && error.name === 'AbortError')) return
+          return failJob(error instanceof Error ? error.message : '材料处理失败')
+        }
+      }
+    }
+
+    void poll()
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [courseId, processingJob?.jobId, setCourses])
+
   if (!course) return <NotFound />
 
-  const updateUploadedMaterials = (
-    baseCourses: Course[],
-    ids: Set<string>,
-    updater: (material: Course['materials'][number], index: number) => Course['materials'][number],
-  ) => setCourses(baseCourses.map((item) => item.id === course.id ? {
-    ...item,
-    materials: item.materials.map((material) => ids.has(material.id) ? updater(material, activeMaterialIdsRef.current.indexOf(material.id)) : material),
-  } : item))
+  const processing = uploading || Boolean(processingJob)
+  const progress = processingJob?.progress ?? (uploading ? 5 : 0)
+  const stageKey = processingJob?.stage ?? 'uploading'
+  const processingStage = processingJob?.message ?? uploadMessage
 
   const cancelProcessing = async () => {
     if (!processing) return
-    cancelledRef.current = true
-    requestControllerRef.current?.abort()
-    const jobId = jobIdRef.current
-    if (jobId) void fetch(`/api/process/${jobId}`, { method: 'DELETE' }).catch(() => undefined)
-    const ids = new Set(activeMaterialIdsRef.current)
-    updateUploadedMaterials(courses, ids, (material) => ({ ...material, status: 'cancelled', error: '已由你取消' }))
-    setProcessing(false)
-    setStageKey('cancelled')
-    setProcessingStage('任务已取消')
+    uploadControllerRef.current?.abort()
+    const job = course.processingJob
+    if (job?.jobId) void fetch(`/api/process/${job.jobId}`, { method: 'DELETE' }).catch(() => undefined)
+    const ids = new Set(job?.materialIds || uploadMaterialIdsRef.current)
+    setCourses((current) => current.map((item) => item.id === course.id ? {
+      ...item,
+      processingJob: undefined,
+      materials: item.materials.map((material) => ids.has(material.id) ? { ...material, status: 'cancelled' as const, error: '已由你取消' } : material),
+    } : item))
+    setUploading(false)
     setApiError('')
     notify('处理已取消，可以重新选择文件')
+  }
+
+  const deleteMaterial = (materialId: string) => {
+    const job = course.processingJob
+    const cancelsJob = Boolean(job?.materialIds.includes(materialId))
+    if (cancelsJob && job) void fetch(`/api/process/${job.jobId}`, { method: 'DELETE' }).catch(() => undefined)
+    setCourses((current) => current.map((item) => {
+      if (item.id !== course.id) return item
+      const activeIds = new Set(item.processingJob?.materialIds || [])
+      return {
+        ...item,
+        processingJob: cancelsJob ? undefined : item.processingJob,
+        materials: item.materials
+          .filter((material) => material.id !== materialId)
+          .map((material) => cancelsJob && activeIds.has(material.id) ? { ...material, status: 'cancelled' as const, error: '同批任务已取消' } : material),
+      }
+    }))
+    setOpenMaterialMenu(null)
+    notify(cancelsJob ? '材料已删除，同批处理任务已取消' : '材料已删除')
   }
 
   const addFiles = async (files: FileList | null) => {
     if (!files?.length || processing) return
     const selectedFiles = Array.from(files)
     const additions = selectedFiles.map((file, index) => ({ id: `upload-${Date.now()}-${index}`, name: file.name, meta: `${Math.max(1, Math.round(file.size / 1024))} KB`, type: file.name.split('.').pop()?.toUpperCase() || 'FILE', status: 'processing' as const, progress: 0 }))
-    const additionIds = new Set(additions.map((item) => item.id))
-    activeMaterialIdsRef.current = additions.map((item) => item.id)
-    cancelledRef.current = false
-    jobIdRef.current = null
+    const materialIds = additions.map((item) => item.id)
+    uploadMaterialIdsRef.current = materialIds
     const controller = new AbortController()
-    requestControllerRef.current = controller
-    const coursesWithUploads = courses.map((item) => item.id === course.id ? { ...item, materials: [...item.materials, ...additions], updated: '刚刚' } : item)
-    setCourses(coursesWithUploads)
+    uploadControllerRef.current = controller
+    setCourses((current) => current.map((item) => item.id === course.id ? { ...item, materials: [...item.materials, ...additions], updated: '刚刚' } : item))
     setApiError('')
-    setProcessing(true)
-    setProgress(5)
-    setStageKey('uploading')
-    setProcessingStage(`正在上传 ${selectedFiles.length} 份材料`)
+    setUploading(true)
+    setUploadMessage(`正在上传 ${selectedFiles.length} 份材料`)
 
     const formData = new FormData()
     selectedFiles.forEach((file) => formData.append('files', file))
-
     try {
-      const startResponse = await fetch('/api/process/start', { method: 'POST', body: formData, signal: controller.signal })
-      const startPayload = await startResponse.json().catch(() => ({}))
-      if (!startResponse.ok) throw new Error(startPayload.detail || `上传失败（HTTP ${startResponse.status}）`)
-      jobIdRef.current = startPayload.job_id
-      setProgress(8)
-      setStageKey('queued')
-      setProcessingStage('文件已上传，等待处理')
-
-      while (!cancelledRef.current) {
-        const statusResponse = await fetch(`/api/process/${startPayload.job_id}`, { signal: controller.signal })
-        const job = await statusResponse.json().catch(() => ({}))
-        if (!statusResponse.ok) throw new Error(job.detail || `读取任务状态失败（HTTP ${statusResponse.status}）`)
-        setProgress(job.progress || 0)
-        setStageKey(job.stage || 'queued')
-        setProcessingStage(job.message || '正在处理材料')
-
-        if (job.status === 'completed' && job.result) {
-          const payload = job.result as {
-            analysis: CourseAnalysis
-            model: string
-            documents: { filename: string; pages: number; processing: string; preview_url: string }[]
-          }
-          setCourses(coursesWithUploads.map((item) => item.id === course.id ? {
-            ...item,
-            analysis: payload.analysis,
-            analysisJobId: startPayload.job_id,
-            description: payload.analysis.summary || item.description,
-            tags: payload.analysis.key_concepts.slice(0, 3),
-            materials: item.materials.map((material) => {
-              if (!additionIds.has(material.id)) return material
-              const materialIndex = activeMaterialIdsRef.current.indexOf(material.id)
-              const document = payload.documents[materialIndex] || payload.documents.find((entry) => entry.filename === material.name)
-              return {
-                ...material,
-                status: 'ready' as const,
-                progress: 100,
-                pages: document?.pages,
-                previewUrl: document?.preview_url,
-                meta: document ? `${document.pages} 页 · ${document.processing}` : material.meta,
-              }
-            }),
-          } : item))
-          setProgress(100)
-          setStageKey('completed')
-          setProcessingStage('分析完成，结果已保存')
-          notify(`材料处理完成，已由 ${payload.model} 生成学习路径`)
-          break
-        }
-        if (job.status === 'failed') throw new Error(job.error || job.message || '材料处理失败')
-        if (job.status === 'cancelled') throw new DOMException('任务已取消', 'AbortError')
-        await new Promise((resolve) => window.setTimeout(resolve, 900))
-      }
+      const response = await fetch('/api/process/start', { method: 'POST', body: formData, signal: controller.signal })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.detail || `上传失败（HTTP ${response.status}）`)
+      setCourses((current) => current.map((item) => item.id === course.id ? {
+        ...item,
+        processingJob: { jobId: payload.job_id, materialIds, progress: 8, stage: 'queued', message: '文件已上传，等待处理' },
+      } : item))
     } catch (error) {
-      if (cancelledRef.current || (error instanceof DOMException && error.name === 'AbortError')) return
-      const message = error instanceof Error ? error.message : '材料处理失败'
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      const message = error instanceof Error ? error.message : '材料上传失败'
       setApiError(message)
-      updateUploadedMaterials(coursesWithUploads, additionIds, (material) => ({ ...material, status: 'failed', error: message }))
+      setCourses((current) => current.map((item) => item.id === course.id ? {
+        ...item,
+        materials: item.materials.map((material) => materialIds.includes(material.id) ? { ...material, status: 'failed' as const, error: message } : material),
+      } : item))
     } finally {
-      setProcessing(false)
-      requestControllerRef.current = null
+      setUploading(false)
+      uploadControllerRef.current = null
       if (inputRef.current) inputRef.current.value = ''
     }
   }
@@ -362,12 +482,15 @@ function CourseDetail({ courses, setCourses, notify }: { courses: Course[]; setC
   ]
   const activeStageIndex = stageKey === 'queued' ? 0 : stageKey === 'completed' ? stages.length : stages.findIndex(([key]) => key === stageKey)
   const analysis = course.analysis
+  const learningSteps = analysis?.learning_path.map(formatLearningStep) || []
+  const conceptLabels = analysis?.key_concepts.map(formatConceptLabel) || []
+  const nextStep = learningSteps[0]?.title || '先导入课堂材料'
 
   return <div className="page">
     <div className="back-row"><Link to="/"><ArrowLeft size={16} />全部课程</Link><span>/</span><span>{course.title}</span></div>
-    <PageHeader title={course.title} subtitle={course.description} actions={<Link className="button primary" to={`/courses/${course.id}/replay`}><BrainCircuit size={17} />开始课堂重放</Link>} />
+    <PageHeader title={course.title} subtitle={courseSubtitle(course)} actions={<Link className="button primary" to={`/courses/${course.id}/replay`}><BrainCircuit size={17} />开始课堂重放</Link>} />
     <CourseSubnav course={course} />
-    <div className="overview-strip"><div><span>材料</span><strong>{course.materials.length}</strong><small>份课堂资料</small></div><div><span>知识点</span><strong>{analysis?.key_concepts.length || 0}</strong><small>{analysis ? '来自本次分析' : '等待材料分析'}</small></div><div><span>整体掌握</span><strong>{course.mastery}%</strong><small className="positive">持续更新</small></div><div className="overview-action"><span>下一步</span><strong>{analysis?.learning_path[0] || '先导入课堂材料'}</strong><small>{analysis ? '进入课堂重放' : '支持多文件上传'}</small></div></div>
+    <div className="overview-strip"><div><span>材料</span><strong>{course.materials.length}</strong><small>份课堂资料</small></div><div><span>知识点</span><strong>{analysis?.key_concepts.length || 0}</strong><small>{analysis ? '来自本次分析' : '等待材料分析'}</small></div><div><span>整体掌握</span><strong>{course.mastery}%</strong><small className="positive">持续更新</small></div><div className="overview-action"><span>下一步</span><strong title={analysis?.learning_path[0]}>{nextStep}</strong><small>{analysis ? '进入课堂重放' : '支持多文件上传'}</small></div></div>
     <div className="materials-layout">
       <section className="panel material-panel">
         <div className="section-heading"><div><h2>课堂材料</h2><p>支持 PDF、PPTX、DOCX、Markdown、TXT 与图片</p></div><button className="button secondary" disabled={processing} onClick={() => inputRef.current?.click()}><UploadCloud size={17} />导入材料</button></div>
@@ -375,13 +498,33 @@ function CourseDetail({ courses, setCourses, notify }: { courses: Course[]; setC
         <button className="drop-zone" onClick={() => inputRef.current?.click()} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files) }}><span><UploadCloud size={23} /></span><strong>拖入课件、笔记或板书照片</strong><small>或点击选择文件 · 单次可上传多份材料</small></button>
         {processing && <div className="processing-card"><div className="processing-top"><div className="spinner" /><div><strong>{processingStage}</strong><span>整页视觉输入 · 不使用 OCR · 可以随时取消</span></div><b>{Math.min(progress, 100)}%</b></div><div className="thin-progress"><span style={{ width: `${Math.min(progress, 100)}%` }} /></div><div className="processing-stages">{stages.map(([key, label], index) => <span key={key} className={index < activeStageIndex ? 'done' : index === activeStageIndex ? 'active' : ''}>{index < activeStageIndex ? <Check size={12} /> : index + 1}{label}</span>)}</div><button className="button danger compact" onClick={() => void cancelProcessing()}><X size={15} />取消处理</button></div>}
         {apiError && <div className="api-error"><CircleHelp size={18} /><div><strong>材料处理失败</strong><p>{apiError}</p></div></div>}
-        {analysis && <div className="analysis-result"><div className="analysis-result-head"><span><Sparkles size={16} /></span><div><small>AI MATERIAL ANALYSIS · 已自动保存</small><h3>{analysis.title}</h3></div><Link className="button primary compact analysis-action" to={`/courses/${course.id}/replay`}>进入课堂重放 <ArrowRight size={14} /></Link></div><p>{analysis.summary}</p>{analysis.learning_path.length > 0 && <div className="analysis-path">{analysis.learning_path.map((step, index) => <span key={`${step}-${index}`}><i>{index + 1}</i>{step}</span>)}</div>}{analysis.key_concepts.length > 0 && <div className="analysis-concepts">{analysis.key_concepts.map((concept, index) => <span key={`${concept}-${index}`}>{concept}</span>)}</div>}</div>}
+        {analysis && <article className="analysis-result">
+          <div className="analysis-result-head"><span><Sparkles size={16} /></span><div><small>AI STUDY BRIEF · 已自动保存</small><h3>{analysis.title}</h3></div><Link className="button primary compact analysis-action" to={`/courses/${course.id}/replay`}>按路线学习 <ArrowRight size={14} /></Link></div>
+          <div className="analysis-study-grid">
+            <section className="analysis-summary-block"><span className="analysis-label"><BookOpen size={14} />本课摘要</span><p className={analysisExpanded ? 'expanded' : ''}>{analysis.summary}</p>{analysis.summary.length > 180 && <button className="analysis-toggle" onClick={() => setAnalysisExpanded((value) => !value)}>{analysisExpanded ? '收起摘要' : '展开完整摘要'} <ChevronDown size={13} /></button>}</section>
+            <section className="analysis-route-block"><span className="analysis-label"><Network size={14} />推荐学习路线</span><div className="analysis-path">{learningSteps.map((step, index) => <div key={`${step.title}-${index}`}><i>{index + 1}</i><span><strong>{step.title}</strong>{step.detail && <small>{step.detail}</small>}</span></div>)}</div></section>
+          </div>
+          {conceptLabels.length > 0 && <div className="analysis-concept-block"><span className="analysis-label"><Lightbulb size={14} />核心概念</span><div className="analysis-concepts">{conceptLabels.map((concept, index) => <span title={analysis.key_concepts[index]} key={`${concept}-${index}`}>{concept}</span>)}</div></div>}
+        </article>}
         <div className="file-list">
-          {course.materials.map((material) => <div className="file-row" key={material.id}><span className={`file-type ${material.type.toLowerCase()}`}><FileText size={18} /></span><div className="file-info"><strong>{material.name}</strong><span title={material.error}>{material.error || material.meta}</span></div>{material.previewUrl && <a className="file-preview-link" href={material.previewUrl} target="_blank" rel="noreferrer">查看文档</a>}<div className={`status ${material.status}`}>{material.status === 'ready' ? <><CheckCircle2 size={15} />已就绪</> : material.status === 'failed' ? <><X size={14} />失败</> : material.status === 'cancelled' ? <><X size={14} />已取消</> : <><RefreshCw size={14} />AI 处理中</>}</div><button className="icon-button tiny"><MoreHorizontal size={17} /></button></div>)}
+          {course.materials.map((material) => <div className="file-row" key={material.id}>
+            <span className={`file-type ${material.type.toLowerCase()}`}><FileText size={18} /></span>
+            <div className="file-info"><strong>{material.name}</strong><span title={material.error}>{material.error || material.meta}</span></div>
+            {material.previewUrl && <a className="file-preview-link" href={material.previewUrl} target="_blank" rel="noreferrer">查看文档</a>}
+            <div className={`status ${material.status}`}>{material.status === 'ready' ? <><CheckCircle2 size={15} />已就绪</> : material.status === 'failed' ? <><X size={14} />失败</> : material.status === 'cancelled' ? <><X size={14} />已取消</> : <><RefreshCw size={14} />AI 处理中{material.progress ? ` · ${material.progress}%` : ''}</>}</div>
+            <div className="material-menu-wrap">
+              <button className="icon-button tiny" aria-label={`${material.name} 操作`} aria-expanded={openMaterialMenu === material.id} onClick={() => setOpenMaterialMenu((current) => current === material.id ? null : material.id)}><MoreHorizontal size={17} /></button>
+              {openMaterialMenu === material.id && <div className="material-menu">
+                {material.previewUrl && <a href={material.previewUrl} target="_blank" rel="noreferrer"><FileText size={14} />查看文档</a>}
+                {material.status === 'processing' && <button onClick={() => void cancelProcessing()}><X size={14} />取消处理</button>}
+                <button className="delete" onClick={() => deleteMaterial(material.id)}><Trash2 size={14} />删除材料</button>
+              </div>}
+            </div>
+          </div>)}
         </div>
       </section>
       <aside className="right-stack">
-        <section className="panel knowledge-preview"><div className="panel-kicker"><Network size={16} />知识路径</div><h3>{analysis ? `${analysis.learning_path.length} 个学习阶段 · ${analysis.key_concepts.length} 个概念` : '等待材料分析'}</h3><div className="mini-tree"><span className="tree-root">{analysis?.title || course.title}</span><i /><div>{(analysis?.learning_path.slice(0, 3) || ['上传材料', 'AI 分析', '开始重放']).map((step, index) => <span key={`${step}-${index}`} className={index === 0 && analysis ? 'active' : ''}>{step}</span>)}</div></div><Link to={`/courses/${course.id}/replay`} className="text-link">查看完整路径 <ArrowRight size={15} /></Link></section>
+        <section className="panel knowledge-preview"><div className="panel-kicker"><Network size={16} />知识路径</div><h3>{analysis ? `${learningSteps.length} 个学习阶段 · ${conceptLabels.length} 个概念` : '等待材料分析'}</h3><div className="mini-tree"><span className="tree-root">{analysis?.title || course.title}</span><i /><div>{(learningSteps.slice(0, 3).map((step) => step.title).length ? learningSteps.slice(0, 3).map((step) => step.title) : ['上传材料', 'AI 分析', '开始重放']).map((step, index) => <span title={analysis?.learning_path[index]} key={`${step}-${index}`} className={index === 0 && analysis ? 'active' : ''}>{step}</span>)}</div></div><Link to={`/courses/${course.id}/replay`} className="text-link">查看完整路径 <ArrowRight size={15} /></Link></section>
         <section className="panel provider-note"><div className="provider-top"><span className="online-dot" />CheapRouter 视觉处理</div><p>图片与文档页面直接交给视觉模型，不执行 OCR；API Key 只保存在服务端。</p><Link to="/settings">查看配置</Link></section>
       </aside>
     </div>
@@ -398,9 +541,9 @@ function Replay({ courses, notify }: { courses: Course[]; notify: (message: stri
   const [chat, setChat] = useState('')
   const [messages, setMessages] = useState<string[]>([])
   const [branch, setBranch] = useState(false)
-  const replayNodes = useMemo(() => course?.analysis?.learning_path.length ? course.analysis.learning_path.map((title, index) => ({
+  const replayNodes = useMemo(() => course?.analysis?.learning_path.length ? course.analysis.learning_path.map((rawStep, index) => ({
     id: `analysis-${index}`,
-    title,
+    title: formatLearningStep(rawStep).title,
     eyebrow: index === 0 ? '当前材料' : 'AI 学习路径',
     mastery: index === 0 ? mastery : 0,
     duration: '按材料学习',
@@ -449,7 +592,7 @@ function Replay({ courses, notify }: { courses: Course[]; notify: (message: stri
         <div className="slide-stage">
           {activeMaterial?.previewUrl ? (['PNG', 'JPG', 'JPEG', 'WEBP'].includes(activeMaterial.type) ? <img className="material-preview-media" src={activeMaterial.previewUrl} alt={activeMaterial.name} /> : <iframe className="material-preview-frame" src={activeMaterial.previewUrl} title={activeMaterial.name} />) : <div className="slide-paper">
             <div className="slide-index">03 <span>COMBINATIONAL LOGIC</span></div>
-            <h2>{course.analysis?.title || '卡诺图化简'}</h2><p className="slide-lead">{course.analysis?.summary || '利用相邻项合并，消去变化的变量'}</p>
+            <h2>{course.analysis?.title || '卡诺图化简'}</h2><p className="slide-lead">{course.analysis ? trimText(course.analysis.summary, 140) : '利用相邻项合并，消去变化的变量'}</p>
             <div className="kmap-wrap"><div className="kmap-label top">AB</div><div className="kmap-label side">CD</div><div className="kmap">
               {[1,1,0,0, 1,1,0,1, 0,0,1,1, 0,0,1,1].map((value, index) => <span key={index} className={value ? 'one' : ''}>{value}</span>)}
               <i className="k-loop loop-one" /><i className="k-loop loop-two" />
@@ -466,7 +609,7 @@ function Replay({ courses, notify }: { courses: Course[]; notify: (message: stri
         <div className="ai-head"><div><span className="ai-avatar"><Bot size={19} /></span><div><strong>AI 讲师</strong><small><span className="online-dot" />基于 {course.materials.filter((item) => item.status === 'ready').length} 份课程材料</small></div></div><button className="icon-button tiny"><MoreHorizontal size={17} /></button></div>
         <div className="chat-scroll">
           {branch && <div className="branch-banner"><span><GitBranchIcon />探索支线 · 深度 1</span><button onClick={() => setBranch(false)}>返回主线</button></div>}
-          <div className="ai-message"><p>{course.analysis?.summary || <>观察这个卡诺图。橙色圈跨过了左右边界——因为卡诺图的列按 <strong>00、01、11、10</strong> 排列，首尾依然只相差一个变量。</>}</p><div className="citation-row">{course.materials.slice(0, 2).map((material, index) => <button key={material.id}>[{index + 1}] {material.name}</button>)}</div></div>
+          <div className="ai-message"><p>{course.analysis ? trimText(course.analysis.summary, 320) : <>观察这个卡诺图。橙色圈跨过了左右边界——因为卡诺图的列按 <strong>00、01、11、10</strong> 排列，首尾依然只相差一个变量。</>}</p><div className="citation-row">{course.materials.slice(0, 2).map((material, index) => <button key={material.id}>[{index + 1}] {material.name}</button>)}</div></div>
           <div className="ai-message question-card"><span className="question-type">理解检验 · {generatedQuestion ? '基于材料' : '单选题'}</span><p><strong>{generatedQuestion || '为什么卡诺图中最左列与最右列可以视为相邻？'}</strong></p>{generatedQuestion ? <textarea className="review-answer" value={answer || ''} disabled={submitted} onChange={(event) => setAnswer(event.target.value)} placeholder="根据刚才看到的材料写下你的理解…" /> : <div className="answer-list">
             {[['A','它们在图形位置上最近'],['B','格雷码顺序使它们仅有一位变量不同'],['C','所有边界上的格子都彼此相邻'],['D','这是为了让化简结果更短']].map(([key, value]) => <button key={key} disabled={submitted} onClick={() => setAnswer(key)} className={`${answer === key ? 'selected' : ''} ${submitted && key === 'B' ? 'correct' : ''} ${submitted && answer === key && key !== 'B' ? 'wrong' : ''}`}><span>{key}</span>{value}{submitted && key === 'B' && <CheckCircle2 size={16} />}</button>)}
           </div>}<button className="button primary full" disabled={!answer?.trim() || submitted} onClick={submitAnswer}>{submitted ? '回答已保存' : '提交回答'}</button></div>
@@ -486,24 +629,24 @@ function Review({ courses, notify }: { courses: Course[]; notify: (message: stri
   const [tab, setTab] = useState<'quiz' | 'sheet'>('quiz')
   const [generated, setGenerated] = useState(false)
   if (!course) return <NotFound />
-  const recommendedConcepts = course.analysis?.key_concepts.slice(0, 3) || ['卡诺图边界相邻', '最小项表达', '竞争与冒险']
+  const recommendedConcepts = course.analysis?.key_concepts.slice(0, 3).map(formatConceptLabel) || ['卡诺图边界相邻', '最小项表达', '竞争与冒险']
   return <div className="page"><div className="back-row"><Link to={`/courses/${course.id}`}><ArrowLeft size={16} />{course.title}</Link></div><PageHeader title="复习工坊" subtitle="把薄弱点、错题和必会知识组合成一次高效复习。" actions={<button className="button primary" onClick={() => { setGenerated(true); notify(tab === 'quiz' ? '已根据材料生成复习题' : 'Cheatsheet 已生成') }}><Sparkles size={17} />立即生成</button>} /><CourseSubnav course={course} />
-    <div className="review-layout"><section className="panel builder-panel"><div className="mode-switch"><button onClick={() => { setTab('quiz'); setGenerated(false) }} className={tab === 'quiz' ? 'active' : ''}><ListChecks size={18} />复习题单</button><button onClick={() => { setTab('sheet'); setGenerated(false) }} className={tab === 'sheet' ? 'active' : ''}><FileText size={18} />一页 Cheatsheet</button></div><div className="builder-copy"><span className="pill amber"><Sparkles size={13} />{course.analysis ? '根据已上传材料推荐' : '根据你的学习记录推荐'}</span><h2>{tab === 'quiz' ? '生成一次 20 分钟的针对性练习' : '生成一页纸核心知识总结'}</h2><p>{course.analysis?.summary || (tab === 'quiz' ? '系统会提高薄弱知识点与历史错题的出现权重。' : '浓缩核心定义、公式、知识联系与易错点，并保留来源引用。')}</p></div><div className="form-grid"><label>知识范围<select><option>{course.analysis?.title || '当前章节：逻辑函数化简'}</option><option>整门课程</option><option>仅薄弱知识点</option></select></label><label>{tab === 'quiz' ? '复习时长' : '内容密度'}<select><option>{tab === 'quiz' ? `材料题 · ${course.analysis?.review_questions.length || 12} 题` : '标准 · 一页 A4'}</option><option>{tab === 'quiz' ? '10 分钟 · 精简模式' : '精简 · 只保留必会项'}</option></select></label><label>难度<select><option>自适应</option><option>基础巩固</option><option>考试挑战</option></select></label><label>内容侧重<select><option>薄弱点优先</option><option>平均覆盖</option><option>错题优先</option></select></label></div><div className="recommend-row"><span><Target size={16} />将重点覆盖</span>{recommendedConcepts.map((concept, index) => <button key={`${concept}-${index}`}>{concept}</button>)}</div></section>
+    <div className="review-layout"><section className="panel builder-panel"><div className="mode-switch"><button onClick={() => { setTab('quiz'); setGenerated(false) }} className={tab === 'quiz' ? 'active' : ''}><ListChecks size={18} />复习题单</button><button onClick={() => { setTab('sheet'); setGenerated(false) }} className={tab === 'sheet' ? 'active' : ''}><FileText size={18} />一页 Cheatsheet</button></div><div className="builder-copy"><span className="pill amber"><Sparkles size={13} />{course.analysis ? '根据已上传材料推荐' : '根据你的学习记录推荐'}</span><h2>{tab === 'quiz' ? '生成一次 20 分钟的针对性练习' : '生成一页纸核心知识总结'}</h2><p>{course.analysis ? trimText(course.analysis.summary, 220) : (tab === 'quiz' ? '系统会提高薄弱知识点与历史错题的出现权重。' : '浓缩核心定义、公式、知识联系与易错点，并保留来源引用。')}</p></div><div className="form-grid"><label>知识范围<select><option>{course.analysis?.title || '当前章节：逻辑函数化简'}</option><option>整门课程</option><option>仅薄弱知识点</option></select></label><label>{tab === 'quiz' ? '复习时长' : '内容密度'}<select><option>{tab === 'quiz' ? `材料题 · ${course.analysis?.review_questions.length || 12} 题` : '标准 · 一页 A4'}</option><option>{tab === 'quiz' ? '10 分钟 · 精简模式' : '精简 · 只保留必会项'}</option></select></label><label>难度<select><option>自适应</option><option>基础巩固</option><option>考试挑战</option></select></label><label>内容侧重<select><option>薄弱点优先</option><option>平均覆盖</option><option>错题优先</option></select></label></div><div className="recommend-row"><span><Target size={16} />将重点覆盖</span>{recommendedConcepts.map((concept, index) => <button key={`${concept}-${index}`}>{concept}</button>)}</div></section>
       <aside className={`panel artifact-preview ${generated ? 'generated' : ''}`}>{generated ? tab === 'quiz' ? <QuizPreview questions={course.analysis?.review_questions} title={course.analysis?.title} /> : <SheetPreview analysis={course.analysis} materialCount={course.materials.length} /> : <><span className="artifact-icon">{tab === 'quiz' ? <ListChecks size={30} /> : <FileText size={30} />}</span><h3>生成内容将在这里预览</h3><p>{course.analysis ? '内容将直接使用当前课程已保存的分析结果。' : '上传材料并完成分析后，可根据知识路径继续生成复习内容。'}</p></>}</aside></div>
   </div>
 }
 
 function QuizPreview({ questions, title }: { questions?: string[]; title?: string }) { const items = questions?.length ? questions : ['一个四变量卡诺图中，位于四个角的最小项能否合并？']; return <div className="quiz-preview"><div className="preview-head"><span>已生成 · 来自课程材料</span><strong>{title || '期中针对性复习'}</strong><small>{items.length} 题 · AI 分析结果已保存</small></div>{items.slice(0, 3).map((question, index) => <div className="preview-question generated-question" key={`${question}-${index}`}><span>{String(index + 1).padStart(2, '0')} · 开放题</span><p>{question}</p></div>)}<button className="button dark full">开始答题 <ArrowRight size={16} /></button></div> }
 
-function SheetPreview({ analysis, materialCount }: { analysis?: CourseAnalysis; materialCount: number }) { return <div className="sheet-preview"><div className="preview-head"><span>CHEATSHEET · 已保存分析</span><strong>{analysis?.title || '逻辑函数化简'}</strong><small>基于 {materialCount} 份课程材料</small></div><h4>01 · 内容摘要</h4><p>{analysis?.summary || '相邻最小项只有一个变量取值不同，合并后可消去该变量。'}</p><h4>02 · 核心概念</h4><div className="analysis-concepts">{(analysis?.key_concepts || ['相邻项', '格雷码', '函数化简']).map((concept, index) => <span key={`${concept}-${index}`}>{concept}</span>)}</div><h4>03 · 学习路径</h4><p>{(analysis?.learning_path || ['理解概念', '跟随例题', '完成检验']).join(' → ')}</p></div> }
+function SheetPreview({ analysis, materialCount }: { analysis?: CourseAnalysis; materialCount: number }) { return <div className="sheet-preview"><div className="preview-head"><span>CHEATSHEET · 已保存分析</span><strong>{analysis?.title || '逻辑函数化简'}</strong><small>基于 {materialCount} 份课程材料</small></div><h4>01 · 内容摘要</h4><p>{analysis ? trimText(analysis.summary, 480) : '相邻最小项只有一个变量取值不同，合并后可消去该变量。'}</p><h4>02 · 核心概念</h4><div className="analysis-concepts">{(analysis?.key_concepts.map(formatConceptLabel) || ['相邻项', '格雷码', '函数化简']).map((concept, index) => <span key={`${concept}-${index}`}>{concept}</span>)}</div><h4>03 · 学习路径</h4><p>{(analysis?.learning_path.map((step) => formatLearningStep(step).title) || ['理解概念', '跟随例题', '完成检验']).join(' → ')}</p></div> }
 
 function Progress({ courses }: { courses: Course[] }) {
   const course = useCourse(courses)
   const [mastery] = useState(loadMastery)
   if (!course) return <NotFound />
   const bars = [42, 48, 45, 54, 61, 68, mastery]
-  const progressNodes = course.analysis?.learning_path.length ? course.analysis.learning_path.map((title, index) => ({ id: `analysis-${index}`, title, mastery: index === 0 ? mastery : Math.max(0, mastery - index * 12) })) : knowledgeNodes
-  const weakConcepts = course.analysis?.key_concepts.slice(0, 2) || ['卡诺图边界相邻', '最小项标准形式']
+  const progressNodes = course.analysis?.learning_path.length ? course.analysis.learning_path.map((step, index) => ({ id: `analysis-${index}`, title: formatLearningStep(step).title, mastery: index === 0 ? mastery : Math.max(0, mastery - index * 12) })) : knowledgeNodes
+  const weakConcepts = course.analysis?.key_concepts.slice(0, 2).map(formatConceptLabel) || ['卡诺图边界相邻', '最小项标准形式']
   return <div className="page"><div className="back-row"><Link to={`/courses/${course.id}`}><ArrowLeft size={16} />{course.title}</Link></div><PageHeader title="我的学习" subtitle="看见每一次真正理解，也看见下一步该往哪里走。" /><CourseSubnav course={course} /><section className="progress-hero"><div><span className="eyebrow">OVERALL MASTERY</span><strong>{mastery}%</strong><p>整体掌握度 · 最近 7 天提升 15%</p></div><div className="trend-chart">{bars.map((bar, index) => <span key={index} style={{ height: `${bar}%` }}><i>{index === bars.length - 1 ? `${bar}%` : ''}</i></span>)}</div><div className="streak"><span><Zap size={18} /></span><strong>7 天</strong><small>连续学习</small></div></section><div className="progress-grid"><section className="panel"><div className="section-heading compact"><div><h2>{course.analysis ? '材料学习路径' : '知识点掌握'}</h2><p>{course.analysis ? '来自已保存的 AI 分析' : '按优先级排序'}</p></div></div><div className="mastery-list">{progressNodes.map((node) => <div key={node.id}><span>{node.title}<small>{node.mastery >= 75 ? '已掌握' : node.mastery > 0 ? '继续巩固' : '待学习'}</small></span><div><i style={{ width: `${node.mastery}%` }} /></div><strong>{node.mastery}%</strong></div>)}</div></section><section className="panel weakness-panel"><div className="section-heading compact"><div><h2>优先补强</h2><p>{course.analysis ? '来自材料关键概念' : '来自错题与探索记录'}</p></div></div>{weakConcepts.map((concept, index) => <div className="weak-item" key={`${concept}-${index}`}><span className={`priority ${index === 0 ? 'high' : 'mid'}`}>{index === 0 ? '高' : '中'}</span><div><strong>{concept}</strong><p>{course.analysis ? '建议在课堂重放中结合原文查看' : '来自历史学习记录'}</p></div><Link to={`/courses/${course.id}/replay`}>去复习</Link></div>)}<div className="branch-summary"><Network size={18} /><div><strong>{course.analysis?.learning_path.length || 3} 个学习阶段</strong><p>学习内容已和当前课程材料关联。</p></div></div></section></div></div>
 }
 
