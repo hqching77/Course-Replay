@@ -181,14 +181,23 @@ def _parse_analysis(content: str) -> CourseMaterialAnalysis:
     return CourseMaterialAnalysis(summary=content, raw=content)
 
 
+def _class_questions_note(questions: list[str]) -> str:
+    listed = "\n".join(f"{index}. {question}" for index, question in enumerate(questions, start=1))
+    return (
+        "\n\n学生上课时（上课中）提出过下面这些问题。请在与之相关的知识点正文末尾加一个「### 课上疑问」小节，"
+        "引用原问题并结合材料解答；与材料无关的问题可以略过，不要为此新建节点：\n" + listed
+    )
+
+
 async def analyze_materials(
     documents: list[PreparedVisualDocument],
     provider: AIProvider,
+    class_questions: list[str] | None = None,
 ) -> tuple[CourseMaterialAnalysis, dict[str, Any] | None]:
-    content: list[dict[str, Any]] = [{
-        "type": "text",
-        "text": "请完整分析下面所有课堂材料，像讲师一样把每个知识点讲透（含例子），并组合成一条连贯的分层学习路径。",
-    }]
+    intro = "请完整分析下面所有课堂材料，像讲师一样把每个知识点讲透（含例子），并组合成一条连贯的分层学习路径。"
+    if class_questions:
+        intro += _class_questions_note(class_questions)
+    content: list[dict[str, Any]] = [{"type": "text", "text": intro}]
     for document in documents:
         content.extend(document.content_parts)
     raw, usage = await provider.analyze_visual_materials(content, system_prompt=SYSTEM_PROMPT, max_tokens=8000)

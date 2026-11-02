@@ -1,7 +1,8 @@
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 
 class HealthResponse(BaseModel):
@@ -164,3 +165,165 @@ class StudyAskResponse(BaseModel):
     relation: str | None = None
     new_dialog: bool = False
     dialog_title: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# In-class (上课中) questions
+# ---------------------------------------------------------------------------
+
+
+class ClassAskTurn(BaseModel):
+    question: str = Field(max_length=2000)
+    answer: str = Field(default="", max_length=6000)
+
+
+class ClassAskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    course_title: str = Field(default="课程", max_length=200)
+    section_title: str = Field(default="", max_length=200)
+    current_topic: str = Field(default="", max_length=300)
+    summary: str = Field(default="", max_length=4000)
+    key_concepts: list[str] = Field(default_factory=list, max_length=30)
+    recent: list[ClassAskTurn] = Field(default_factory=list, max_length=6)
+
+
+class ClassAskResponse(BaseModel):
+    answer: str
+
+
+# ---------------------------------------------------------------------------
+# Accounts
+# ---------------------------------------------------------------------------
+
+USERNAME_PATTERN = r"^[\w.@-]{2,32}$"
+
+
+class RegisterRequest(BaseModel):
+    username: str = Field(pattern=USERNAME_PATTERN)
+    password: str = Field(min_length=6, max_length=128)
+    display_name: str = Field(default="", max_length=32)
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class UserRead(BaseModel):
+    id: str
+    username: str
+    display_name: str
+    created_at: datetime
+
+
+class AuthResponse(BaseModel):
+    token: str
+    user: UserRead
+
+
+class UserUpdate(BaseModel):
+    display_name: str = Field(min_length=1, max_length=32)
+
+
+# ---------------------------------------------------------------------------
+# Study workspace. Field names mirror the web app's TypeScript types
+# (camelCase on the wire) so the browser can send and receive them as-is.
+# ---------------------------------------------------------------------------
+
+ClientId = Annotated[str, Field(min_length=1, max_length=200)]
+
+
+class CamelModel(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+class WorkspaceMaterial(CamelModel):
+    id: ClientId
+    name: str = ""
+    meta: str = ""
+    type: str = Field(default="", max_length=32)
+    status: str = Field(default="pending", max_length=32)
+    progress: int | None = None
+    error: str | None = None
+    preview_url: str | None = None
+    pages: int | None = None
+
+
+class WorkspaceMessage(CamelModel):
+    id: ClientId
+    role: str = Field(pattern=r"^(user|assistant)$")
+    content: str = ""
+    node_id: str | None = Field(default=None, max_length=200)
+
+
+class WorkspaceBranch(CamelModel):
+    id: ClientId
+    title: str = ""
+    parent_id: str = Field(default="", max_length=200)
+    question: str = ""
+
+
+class WorkspaceClassQuestion(CamelModel):
+    id: ClientId
+    question: str = ""
+    answer: str = ""
+    topic: str | None = None
+    status: str = Field(default="answered", pattern=r"^(answering|answered|failed)$")
+    asked_at: int = 0
+    answered_at: int | None = None
+
+
+class WorkspaceSection(CamelModel):
+    id: ClientId
+    title: str = ""
+    created_at: int = 0
+    status: str = Field(default="empty", max_length=32)
+    materials: list[WorkspaceMaterial] = Field(default_factory=list, max_length=500)
+    analysis: dict[str, Any] | None = None
+    analysis_job_id: str | None = Field(default=None, max_length=64)
+    knowledge_map: list[dict[str, Any]] | None = None
+    processing_job: dict[str, Any] | None = None
+    exploration_nodes: list[WorkspaceBranch] | None = Field(default=None, max_length=1000)
+    chat_history: list[WorkspaceMessage] | None = Field(default=None, max_length=5000)
+    mastery: float | None = None
+    class_questions: list[WorkspaceClassQuestion] | None = Field(default=None, max_length=2000)
+    live_started_at: int | None = None
+    live_ended_at: int | None = None
+    live_topic: str | None = None
+
+
+class WorkspaceCourse(CamelModel):
+    id: ClientId
+    title: str = ""
+    code: str = ""
+    description: str = ""
+    tags: list[str] = Field(default_factory=list, max_length=50)
+    mastery: float = 0
+    updated: str = ""
+    accent: str = Field(default="#c7f45d", max_length=32)
+    sections: list[WorkspaceSection] = Field(default_factory=list)
+
+
+class WorkspaceRead(CamelModel):
+    courses: list[WorkspaceCourse]
+
+
+class WorkspaceCoursePut(CamelModel):
+    """Course fields plus the ordered section ids; sections not listed are deleted."""
+
+    id: ClientId
+    title: str = ""
+    code: str = ""
+    description: str = ""
+    tags: list[str] = Field(default_factory=list, max_length=50)
+    mastery: float = 0
+    updated: str = ""
+    accent: str = Field(default="#c7f45d", max_length=32)
+    position: int = 0
+    section_ids: list[str] = Field(default_factory=list, max_length=500)
+
+
+class WorkspaceSectionPut(CamelModel):
+    course_id: ClientId
+    position: int = 0
+    section: WorkspaceSection

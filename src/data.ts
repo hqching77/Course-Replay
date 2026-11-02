@@ -122,6 +122,18 @@ export interface StudyMessage {
   nodeId?: string
 }
 
+/** A question asked during class (上课中), answered on the spot by the AI. */
+export interface ClassQuestion {
+  id: string
+  question: string
+  answer: string
+  /** What the teacher was covering when the question was asked (optional). */
+  topic?: string
+  status: 'answering' | 'answered' | 'failed'
+  askedAt: number
+  answeredAt?: number
+}
+
 export interface Material {
   id: string
   name: string
@@ -154,6 +166,11 @@ export interface Section {
   explorationNodes?: ExplorationNode[]
   chatHistory?: StudyMessage[]
   mastery?: number
+  /** 上课中: questions asked live, shown again in the after-class notes. */
+  classQuestions?: ClassQuestion[]
+  liveStartedAt?: number
+  liveEndedAt?: number
+  liveTopic?: string
 }
 
 export interface Course {
@@ -544,7 +561,7 @@ type LegacyCourse = Course & {
 function migrateCourse(raw: LegacyCourse): Course {
   if (Array.isArray(raw.sections)) {
     // Already section-shaped. Keep the demo course's authored map fresh.
-    if (raw.id === 'programming-linux' && raw.sections[0]) {
+    if (raw.id === 'programming-linux' && raw.sections[0]?.id === 'linux-basics') {
       raw.sections[0] = { ...raw.sections[0], knowledgeMap: linuxKnowledgeMap }
     }
     return raw
@@ -593,8 +610,38 @@ export function loadCourses(): Course[] {
   }
 }
 
+/** Apply the same upgrades to courses loaded from the server as to local ones. */
+export function normalizeCourses(courses: Course[]): Course[] {
+  return courses.map((course) => migrateCourse(course as LegacyCourse))
+}
+
 export function saveCourses(courses: Course[]) {
-  localStorage.setItem(COURSES_KEY, JSON.stringify(courses))
+  try {
+    localStorage.setItem(COURSES_KEY, JSON.stringify(courses))
+  } catch {
+    // storage full or unavailable
+  }
+}
+
+/** Offline (guest) data in this browser that differs from the untouched demo. */
+export function localCoursesToImport(): Course[] | null {
+  try {
+    const stored = localStorage.getItem(COURSES_KEY)
+    if (!stored || stored === JSON.stringify(defaultCourses)) return null
+    const courses = loadCourses()
+    return courses.length ? courses : null
+  } catch {
+    return null
+  }
+}
+
+export function clearLocalCourses() {
+  try {
+    localStorage.removeItem(COURSES_KEY)
+    localStorage.removeItem(MASTERY_KEY)
+  } catch {
+    // ignore
+  }
 }
 
 export function loadMastery(sectionId: string, fallback = 0): number {

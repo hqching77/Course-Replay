@@ -9,11 +9,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app.config import get_settings
+from app.models import User
 from app.schemas import (
+    ClassAskRequest,
+    ClassAskResponse,
     StudyAskRequest,
     StudyAskResponse,
     VisualDocumentInfo,
@@ -28,6 +31,7 @@ from app.services.visual_processor import (
     VisualProcessingError,
     prepare_visual_document,
 )
+from app.security import require_ai_access
 
 
 router = APIRouter(tags=["visual-analysis"])
@@ -115,7 +119,11 @@ def _get_job(job_id: str) -> VisualJob | None:
     return jobs.get(job_id) or _load_completed_job(job_id)
 
 
-async def _run_visual_job(job: VisualJob, stored_files: list[tuple[Path, str]]) -> None:
+async def _run_visual_job(
+    job: VisualJob,
+    stored_files: list[tuple[Path, str]],
+    class_questions: list[str] | None = None,
+) -> None:
     settings = get_settings()
     prepared = []
     try:
@@ -149,7 +157,7 @@ async def _run_visual_job(job: VisualJob, stored_files: list[tuple[Path, str]]) 
         job.stage = "model"
         job.progress = 58
         job.message = f"AI 正在逐文件分析 {len(prepared)} 个文件共 {total_pages} 页"
-        analysis, usage = await analyze_materials(prepared, AIProvider(settings))
+        analysis, usage = await analyze_materials(prepared, AIProvider(settings), class_questions=class_questions)
 
         job.stage = "finalizing"
         job.progress = 92
@@ -196,13 +204,32 @@ async def _run_visual_job(job: VisualJob, stored_files: list[tuple[Path, str]]) 
         job.message = "模型处理失败，可重试或取消"
 
 
+def _parse_class_questions(raw: str | None) -> list[str]:
+    """Questions the student asked in class (JSON list of strings), fed into the build."""
+    if not raw:
+        return []
+    try:
+        items = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(items, list):
+        return []
+    cleaned = [str(item).strip()[:300] for item in items if str(item).strip()]
+    return cleaned[:40]
+
+
 @router.post("/process/start", response_model=VisualJobStartResponse)
-async def start_visual_processing(files: list[UploadFile] = File(...)) -> VisualJobStartResponse:
+async def start_visual_processing(
+    files: list[UploadFile] = File(...),
+    class_questions: str | None = Form(default=None),
+    _user: User | None = Depends(require_ai_access),
+) -> VisualJobStartResponse:
     settings = get_settings()
     if not settings.ai_configured:
         raise HTTPException(status_code=503, detail="请在根目录 .env 配置 OPENAI_API_KEY 和 OPENAI_CHAT_MODEL")
     if not files:
         raise HTTPException(status_code=400, detail="至少上传一个文件")
+    questions = _parse_class_questions(class_questions)
 
     job_id = str(uuid.uuid4())
     work_dir = settings.artifacts_dir / "visual_jobs" / job_id
@@ -232,7 +259,7 @@ async def start_visual_processing(files: list[UploadFile] = File(...)) -> Visual
 
     job = VisualJob(job_id=job_id, filenames=[safe_name for _, safe_name in stored_files], work_dir=work_dir)
     jobs[job_id] = job
-    tasks[job_id] = asyncio.create_task(_run_visual_job(job, stored_files))
+    tasks[job_id] = asyncio.create_task(_run_visual_job(job, stored_files, questions))
     return VisualJobStartResponse(job_id=job_id)
 
 
@@ -252,7 +279,10 @@ def list_visual_jobs() -> list[dict[str, object]]:
 
 
 @router.post("/study/ask", response_model=StudyAskResponse)
-async def ask_study_question(request: StudyAskRequest) -> StudyAskResponse:
+async def ask_study_question(
+    request: StudyAskRequest,
+    _user: User | None = Depends(require_ai_access),
+) -> StudyAskResponse:
     settings = get_settings()
     if not settings.ai_configured:
         raise HTTPException(status_code=503, detail="AI 服务尚未配置")
@@ -317,6 +347,52 @@ answer 字段内的段落之间保留空行，步骤或并列要点使用有序�
         return StudyAskResponse(answer=raw.strip(), add_node=False)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"AI 回答失败：{exc}") from exc
+
+
+CLASS_ASK_PROMPT = """你是 Course Replay 的随堂助教。学生正在上课，听不懂时会即时提问，需要马上看懂、不耽误继续听课。
+回答要求：
+- 第一句直接给出答案或结论，不要寒暄，不要复述问题。
+- 之后用最多 3 个短要点或一个小例子讲清楚；需要时给公式（LaTeX：行内 $...$，独立 $$...$$）或代码。
+- 全部控制在 250 字以内，使用 Markdown。
+- 结合课程、老师正在讲的内容和之前的提问理解问题；"为什么""再讲一下"这类追问默认指最近一次提问。
+- 课程材料没覆盖的内容可以用通用知识回答，但不要编造课程细节。
+默认使用简体中文。"""
+
+
+@router.post("/class/ask", response_model=ClassAskResponse)
+async def ask_in_class(
+    request: ClassAskRequest,
+    _user: User | None = Depends(require_ai_access),
+) -> ClassAskResponse:
+    """上课中: answer a question immediately, in a short form suited to reading mid-lecture."""
+    settings = get_settings()
+    if not settings.ai_configured:
+        raise HTTPException(status_code=503, detail="AI 服务尚未配置")
+    context_lines = [f"课程：{request.course_title}"]
+    if request.section_title:
+        context_lines.append(f"本节课：{request.section_title}")
+    if request.current_topic:
+        context_lines.append(f"老师正在讲：{request.current_topic}")
+    if request.summary:
+        context_lines.append(f"本节材料摘要：{request.summary}")
+    if request.key_concepts:
+        context_lines.append(f"关键概念：{'、'.join(request.key_concepts)}")
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": f"{CLASS_ASK_PROMPT}\n\n" + "\n".join(context_lines)},
+    ]
+    for turn in request.recent[-4:]:
+        if turn.question.strip() and turn.answer.strip():
+            messages.append({"role": "user", "content": turn.question})
+            messages.append({"role": "assistant", "content": turn.answer[:1500]})
+    messages.append({"role": "user", "content": request.question})
+    try:
+        raw = await AIProvider(settings).chat(messages, temperature=0.3, max_tokens=700)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"AI 回答失败：{exc}") from exc
+    answer = raw.strip()
+    if answer.startswith("```") and answer.endswith("```") and answer.count("```") == 2:
+        answer = answer.removeprefix("```markdown").removeprefix("```").removesuffix("```").strip()
+    return ClassAskResponse(answer=answer or "我暂时无法回答这个问题，可以换个说法再问一次。")
 
 
 @router.get("/process/{job_id}", response_model=VisualJobStatus)

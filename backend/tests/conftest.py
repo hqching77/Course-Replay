@@ -1,7 +1,8 @@
 import os
 from pathlib import Path
 
-os.environ["DATABASE_URL"] = "sqlite:///./data/test_course_replay.db"
+# Set TEST_DATABASE_URL to run the suite against another database (e.g. PostgreSQL).
+os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL", "sqlite:///./data/test_course_replay.db")
 os.environ["ARTIFACTS_DIR"] = "./data/test_artifacts"
 os.environ["OPENAI_API_KEY"] = ""
 os.environ["OPENAI_CHAT_MODEL"] = ""

@@ -17,6 +17,8 @@
 >
 > 在根目录 `.env` 中填写 `OPENAI_API_KEY` 和 `OPENAI_CHAT_MODEL`。`OPENAI_BASE_URL` 已配置为 `https://cdn.cheaprouter.cc/v1`；`.env` 已被 Git 忽略。
 >
+> **账号与上课中**：打开前端先登录或注册，每个人的课程、笔记、课堂提问和进度都存在后端数据库（默认 SQLite，可换 PostgreSQL，见 `backend/README.md`）。连不上后端时自动进入离线模式（数据只存本浏览器，GitHub Pages 静态站就是这种模式）。每个小节有「上课中」页面：上课时直接提问、AI 立即回答并记下问题，下课后这些提问出现在「课堂重放」的课堂提问笔记里，构建课件时也会交给 AI 写进相关知识点。
+>
 > 前端地址：http://127.0.0.1:8000；后端地址：http://127.0.0.1:8001。前端通过 `/api` 代理连接后端，保留现有浏览器课程存储，知识拓扑与分析结果不会因本次整合切换存储键。
 
 使用方式：把本文“Prompt 正文”完整交给 Codex、Claude Code、Cursor Agent 等可读写仓库的编码 Agent，并让它在 Course-Replay 仓库根目录执行。

@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     document_render_dpi: int = 110
     cors_origins: str = "http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173,http://127.0.0.1:5173"
 
+    # Accounts. AI endpoints spend the server's API key, so by default only
+    # signed-in users may call them.
+    ai_requires_login: bool = True
+    auth_session_days: int = 30
+    allow_registration: bool = True
+
     openai_api_key: str = ""
     openai_base_url: str = "https://cdn.cheaprouter.cc/v1"
     openai_chat_model: str = ""

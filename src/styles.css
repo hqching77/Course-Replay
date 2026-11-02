@@ -343,3 +343,135 @@ a { color: inherit; text-decoration: none; }
 .preview-question .markdown-body > :first-child { margin-top: 0; }
 .sheet-preview .markdown-body { margin-bottom: 4px; }
 .sheet-preview .markdown-body p { margin: 0; color: #59646a; }
+
+/* ===== 账号：登录 / 注册 / 离线模式 ===== */
+:root { --t-class: #c4b5fd; }
+.auth-screen { min-height: 100vh; display: grid; place-items: center; padding: 28px 18px; background: radial-gradient(circle at 20% 0%, #1a2414 0, transparent 45%), radial-gradient(circle at 85% 100%, #16222c 0, transparent 40%), var(--bg); }
+.auth-card { width: min(420px, 100%); background: #12171e; border: 1px solid #2a323d; border-radius: 16px; padding: 28px 28px 22px; box-shadow: 0 30px 90px #0009; }
+.auth-brand { padding: 0; margin-bottom: 26px; }
+.auth-card h1 { margin: 0; font-size: 26px; letter-spacing: -.04em; }
+.auth-lead { margin: 8px 0 18px; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.auth-notice { margin-bottom: 14px; padding: 10px 12px; border: 1px solid #3a4630; border-radius: 9px; background: #182015; color: #b8d48f; font-size: 11px; }
+.auth-card .api-error { margin: 0 0 14px; align-items: center; }
+.auth-card .api-error > div { flex: 1; }
+.auth-card .api-error p { margin: 3px 0 0; font-size: 11px; }
+.auth-card .api-error .icon-button { color: #ff9a7d; flex: 0 0 auto; }
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 10px; background: #0d1117; border: 1px solid #252c35; }
+.auth-tabs button { border: 0; border-radius: 7px; padding: 8px; background: transparent; color: #87919d; font-size: 12px; font-weight: 600; }
+.auth-tabs button.active { background: #1f2630; color: #f1f4f7; }
+.auth-form { display: grid; gap: 12px; margin-top: 16px; }
+.auth-form label { display: flex; flex-direction: column; gap: 7px; color: #a6afbb; font-size: 11px; }
+.auth-form input { width: 100%; color: #e8edf3; background: #0f1318; border: 1px solid #2c343e; border-radius: 8px; padding: 11px 12px; outline: none; }
+.auth-form input:focus { border-color: #67764f; }
+.auth-form .api-error { margin: 0; }
+.auth-form .button { margin-top: 4px; padding: 12px 15px; }
+.auth-divider { display: flex; align-items: center; gap: 10px; margin: 18px 0 14px; color: #5d6773; font-size: 10px; }
+.auth-divider:before, .auth-divider:after { content: ''; flex: 1; height: 1px; background: #252c35; }
+.auth-foot { display: block; margin-top: 10px; color: #646e7a; font-size: 10px; text-align: center; line-height: 1.6; }
+.splash { display: grid; justify-items: center; gap: 14px; color: #8b95a1; font-size: 12px; text-align: center; }
+.splash p { margin: 0; }
+.splash-actions { display: flex; gap: 10px; }
+.splash .brand-mark { margin-bottom: 4px; }
+
+/* 侧边栏账号菜单与同步状态 */
+.profile-menu-wrap { flex-direction: row !important; }
+.profile-menu { top: auto; bottom: 34px; }
+.profile .sync-label.saving { color: #8fc6e8; }
+.profile .sync-label.error { color: #ff9a80; }
+.nav-item.mobile-only { display: none; }
+
+.account-panel { display: grid; grid-template-columns: 46px 1fr auto; gap: 16px; align-items: center; margin-bottom: 16px; }
+.account-panel .avatar { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 12px; background: #283121; color: var(--lime); font-weight: 700; font-size: 15px; }
+.account-info { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.account-info strong { font-size: 15px; }
+.account-info span { color: #7c8692; font-size: 11px; }
+.account-info p { margin: 6px 0 0; color: #8f99a5; font-size: 11px; line-height: 1.6; }
+.account-actions { display: flex; gap: 8px; }
+
+/* ===== 上课中 ===== */
+.live-topbar { grid-template-columns: 280px 1fr auto; }
+.live-status { display: flex; align-items: center; justify-content: center; gap: 8px; color: #8b95a1; font-size: 11px; font-weight: 600; }
+.live-status b { font-variant-numeric: tabular-nums; color: #e9edf3; font-size: 13px; letter-spacing: .02em; }
+.live-status.live { color: #ff9a80; }
+.live-status.ended b { color: #9aa4b0; font-size: 11px; font-weight: 600; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: #ff6b4a; box-shadow: 0 0 0 0 #ff6b4a88; animation: live-pulse 1.6s ease-out infinite; }
+@keyframes live-pulse { 0% { box-shadow: 0 0 0 0 #ff6b4a88; } 70% { box-shadow: 0 0 0 8px #ff6b4a00; } 100% { box-shadow: 0 0 0 0 #ff6b4a00; } }
+.live-grid { height: calc(100vh - 54px); display: grid; grid-template-columns: 300px minmax(0, 1fr); }
+.live-log-list { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 10px; display: grid; align-content: start; gap: 7px; }
+.live-log-empty { padding: 16px 12px; border: 1px dashed #333c46; border-radius: 10px; color: #737d89; font-size: 10px; line-height: 1.7; }
+.live-log-row { position: relative; }
+.live-log-item { padding-right: 28px; }
+.live-log-item .km-text strong { font-size: 11px; font-weight: 600; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.live-log-item.active { border-color: var(--t-class); background: #1c1830; box-shadow: 0 0 0 2px #c4b5fd22; }
+.live-log-item.active .km-step { border-color: var(--t-class); color: var(--t-class); }
+.live-log-item.answering .km-text small { color: #8fc6e8; }
+.live-log-item.failed .km-text small { color: #ff9a80; }
+.live-log-delete { position: absolute; top: 8px; right: 7px; width: 20px; height: 20px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #5d6773; opacity: 0; transition: .15s ease; }
+.live-log-row:hover .live-log-delete, .live-log-delete:focus-visible { opacity: 1; }
+.live-log-delete:hover { background: #2e1b17; color: #ff9a80; }
+.live-main { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); background: #0b0e12; }
+.live-topic { display: flex; align-items: center; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--line); }
+.live-topic span { flex: 0 0 auto; color: #8a949f; font-size: 10px; font-weight: 700; letter-spacing: .06em; }
+.live-topic input { flex: 1; min-width: 0; border: 1px solid #262e38; background: #0f1318; border-radius: 7px; color: #dce1e7; padding: 8px 10px; font-size: 12px; outline: none; }
+.live-topic input:focus { border-color: #586642; }
+.live-feed { min-height: 0; overflow-y: auto; padding: 22px max(20px, calc((100% - 760px) / 2)) 28px; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 18px; }
+.live-welcome { margin: 9vh auto 0; max-width: 430px; display: grid; justify-items: center; gap: 10px; text-align: center; }
+.live-welcome .ai-avatar { width: 46px; height: 46px; border-radius: 13px; }
+.live-welcome h2 { margin: 6px 0 0; font-size: 22px; letter-spacing: -.03em; }
+.live-welcome p { margin: 0 0 8px; color: #8b95a1; font-size: 12px; line-height: 1.75; }
+.live-qa { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; scroll-margin-top: 14px; border-radius: 12px; transition: box-shadow .2s ease; }
+.live-qa.focused { box-shadow: 0 0 0 2px #c4b5fd55; }
+.live-q { justify-self: end; max-width: 85%; padding: 10px 13px; border-radius: 12px 4px 12px 12px; background: #252133; border: 1px solid #3a3352; }
+.live-q span { display: block; color: #a49ccc; font-size: 9px; margin-bottom: 4px; }
+.live-q p { margin: 0; color: #ebe7ff; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+.live-a { margin: 0; padding: 14px 16px; }
+.live-a .markdown-body.on-dark { font-size: 13px; }
+.live-a.failed { border-color: #5a3029; background: #1d1412; }
+.live-thinking { display: flex; align-items: center; gap: 9px; color: #899781; font-size: 12px; }
+.live-failed { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.live-failed p { color: #ff9a80; font-size: 12px; }
+.live-failed button { flex: 0 0 auto; display: flex; align-items: center; gap: 5px; border: 1px solid #6f3b32; border-radius: 6px; background: #3a211d; color: #ff9b82; padding: 6px 9px; font-size: 11px; }
+.live-ask { padding: 12px max(20px, calc((100% - 760px) / 2)) 14px; }
+.live-ask .quick-prompts button { font-size: 10px; padding: 6px 9px; }
+.live-ask .ask-input textarea { min-height: 64px; font-size: 13px; padding: 11px 44px 11px 12px; }
+.live-ask .ask-input button { width: 32px; height: 32px; }
+.live-ask > small { font-size: 9px; }
+
+/* 课堂重放里的「课上提问」分组 */
+.tier-class .tier-dot { background: var(--t-class); }
+.tier-class .tier-label strong { color: #e1d9ff; }
+.tier-class .tier-nodes:before { background: linear-gradient(#c4b5fd55, #c4b5fd11); }
+.tier-class .km-node.active { border-color: var(--t-class); background: #1c1830; box-shadow: 0 0 0 2px #c4b5fd22; }
+.tier-class .km-node.active .km-step, .tier-class .km-step { color: var(--t-class); }
+.class-branch { border-color: #3d3560; background: #1a1729; color: #d4caff; }
+.class-branch:before { background: #3d3560; }
+.class-branch svg { color: #9d8fe0; }
+.class-branch.active { border-color: var(--t-class); background: #241e3d; color: #f0ecff; box-shadow: 0 0 0 2px #c4b5fd22; }
+.tier-badge.tier-class { color: #1b1530; background: var(--t-class); }
+.topology-legend i.t-class { background: var(--t-class); }
+.class-note-panel h3 { margin-bottom: 8px; }
+.class-note-panel p { margin: 0 0 14px; color: #8f99a5; font-size: 11px; line-height: 1.65; }
+
+@media (max-width: 1180px) {
+  .live-grid { grid-template-columns: 250px minmax(0, 1fr); }
+}
+@media (max-width: 920px) {
+  .live-topbar { grid-template-columns: 1fr auto auto; gap: 10px; }
+  .live-grid { grid-template-columns: 220px minmax(0, 1fr); }
+  .account-panel { grid-template-columns: 46px 1fr; }
+  .account-actions { grid-column: 1 / -1; }
+}
+@media (max-width: 680px) {
+  .nav-item.mobile-only { display: flex; }
+  .live-topbar { grid-template-columns: auto 1fr auto; }
+  .live-topbar > a { max-width: 110px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .live-grid { display: block; height: calc(100dvh - 54px - 61px); }
+  .live-log { display: none !important; }
+  .live-main { height: 100%; }
+  .live-topic { padding: 8px 12px; }
+  .live-topic span { display: none; }
+  .live-feed { padding: 16px 12px 20px; }
+  .live-q { max-width: 92%; }
+  .live-ask { padding: 10px 12px 12px; }
+  .live-ask > small { display: none; }
+}

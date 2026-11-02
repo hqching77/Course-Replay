@@ -22,19 +22,28 @@ import {
   Lightbulb,
   Link as LinkIcon,
   ListChecks,
+  LogIn,
+  LogOut,
+  MessageCircleQuestion,
   MessageSquareText,
   MoreHorizontal,
   Network,
+  NotebookPen,
   PanelLeftClose,
+  PenLine,
+  Play,
   Plus,
+  Radio,
   RefreshCw,
   Search,
   Send,
   Settings,
   Sparkles,
+  Square,
   Target,
   Trash2,
   UploadCloud,
+  UserRound,
   X,
   Zap,
 } from 'lucide-react'
@@ -44,10 +53,11 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
-import { Course, CourseAnalysis, KnowledgeNode, KnowledgeTier, Material, Section, TIER_META, courseMastery, createSection, deriveKnowledgeMap, knowledgeNodes, loadCourses, loadMastery, normalizeMarkdown, saveCourses, saveMastery } from './data'
-
-// Backend origin. Empty = same origin (Vite dev proxy). Set VITE_API_BASE at build time to point a hosted frontend at a deployed backend.
-const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
+import { ClassQuestion, Course, CourseAnalysis, KnowledgeNode, KnowledgeTier, Material, Section, TIER_META, courseMastery, createSection, deriveKnowledgeMap, knowledgeNodes, loadMastery, normalizeMarkdown, saveMastery } from './data'
+import { apiFetch, apiUrl } from './api'
+import { AuthScreen, SplashScreen } from './AuthScreen'
+import { SessionControls, displayNameOf, initialsOf, useSession } from './session'
+import { SyncState, useCourseStore } from './workspace'
 
 /** Update a single section inside the courses array immutably. */
 function updateSection(setCourses: Dispatch<SetStateAction<Course[]>>, courseId: string, sectionId: string, updater: (section: Section) => Section) {
@@ -123,29 +133,78 @@ function firstSectionId(course: Course | undefined) {
   return course?.sections[0]?.id
 }
 
+function lastSectionId(course: Course | undefined) {
+  return course?.sections[course.sections.length - 1]?.id
+}
+
 function App() {
-  const [courses, setCourses] = useState<Course[]>(loadCourses)
+  const controls = useSession()
+  const { session } = controls
+  if (session.status === 'checking') return <SplashScreen text="正在连接…" />
+  if (session.status === 'signed-out') return <AuthScreen notice={session.notice} onSignedIn={controls.signIn} onGuest={controls.continueAsGuest} onRetry={() => void controls.retry()} />
+  // Remount per user so one account's courses never leak into another's.
+  return <Workspace key={session.status === 'account' ? session.user.id : 'guest'} controls={controls} />
+}
+
+/** Signed-in user (server sync) or guest (this browser only), as shown in the sidebar and settings. */
+interface AccountView {
+  mode: 'account' | 'guest'
+  name: string
+  username?: string
+  syncState: SyncState
+  offlineOnly: boolean
+  rename: () => void
+  signOut: () => void
+  showLogin: () => void
+}
+
+function syncLabel(account: AccountView) {
+  if (account.mode === 'guest') return account.offlineOnly ? '离线模式 · 未连接服务器' : '离线模式 · 仅存本机'
+  return account.syncState === 'saving' ? '同步中…' : account.syncState === 'error' ? '同步失败，稍后自动重试' : '已同步到云端'
+}
+
+function Workspace({ controls }: { controls: SessionControls }) {
+  const { session } = controls
+  const store = useCourseStore(session, controls.expire)
+  const { courses, setCourses } = store
   const [notices, setNotices] = useState<Notice[]>([])
 
-  useEffect(() => saveCourses(courses), [courses])
-
   const notify = (message: string) => {
-    const id = Date.now()
+    const id = Date.now() + Math.random()
     setNotices((items) => [...items, { id, message }])
     window.setTimeout(() => setNotices((items) => items.filter((item) => item.id !== id)), 2600)
   }
 
+  const account: AccountView = {
+    mode: session.status === 'account' ? 'account' : 'guest',
+    name: displayNameOf(session),
+    username: session.status === 'account' ? session.user.username : undefined,
+    syncState: store.syncState,
+    offlineOnly: session.status === 'guest' && session.offlineOnly,
+    rename: () => {
+      const name = window.prompt('修改昵称', displayNameOf(session))
+      if (!name || !name.trim() || name.trim() === displayNameOf(session)) return
+      controls.rename(name).then(() => notify('昵称已更新')).catch((error) => notify(error instanceof Error ? error.message : '修改失败'))
+    },
+    signOut: () => { void store.flush().finally(() => void controls.signOut()) },
+    showLogin: controls.showLogin,
+  }
+
+  if (store.loadState === 'loading') return <SplashScreen text="正在加载你的课程…" />
+  if (store.loadState === 'error') return <SplashScreen text="加载课程失败，请检查网络或服务器。"><button className="button primary" onClick={store.reload}><RefreshCw size={16} />重试</button><button className="button ghost" onClick={account.signOut}>退出登录</button></SplashScreen>
+
   return (
     <div className="app-shell">
-      <Sidebar />
+      <Sidebar courses={courses} account={account} />
       <main className="main-shell">
         <Routes>
           <Route path="/" element={<Dashboard courses={courses} setCourses={setCourses} notify={notify} />} />
           <Route path="/courses/:courseId" element={<CourseSections courses={courses} setCourses={setCourses} notify={notify} />} />
           <Route path="/courses/:courseId/sections/:sectionId" element={<SectionDetail courses={courses} setCourses={setCourses} notify={notify} />} />
+          <Route path="/courses/:courseId/sections/:sectionId/live" element={<LiveClass courses={courses} setCourses={setCourses} notify={notify} />} />
           <Route path="/courses/:courseId/sections/:sectionId/replay" element={<Replay courses={courses} setCourses={setCourses} notify={notify} />} />
           <Route path="/courses/:courseId/replay" element={<LegacySectionRedirect courses={courses} suffix="replay" />} />
-          <Route path="/settings" element={<SettingsPage notify={notify} />} />
+          <Route path="/settings" element={<SettingsPage notify={notify} account={account} />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
@@ -158,11 +217,15 @@ function App() {
   )
 }
 
-function Sidebar() {
+function Sidebar({ courses, account }: { courses: Course[]; account: AccountView }) {
   const location = useLocation()
-  const courseId = location.pathname.match(/\/courses\/([^/]+)/)?.[1] || 'programming-linux'
+  const [menuOpen, setMenuOpen] = useState(false)
+  const courseId = location.pathname.match(/\/courses\/([^/]+)/)?.[1] || courses[0]?.id || 'programming-linux'
   const sectionId = location.pathname.match(/\/sections\/([^/]+)/)?.[1]
   const base = sectionId ? `/courses/${courseId}/sections/${sectionId}` : `/courses/${courseId}`
+  // Outside a section, 上课中 opens the current (or first) course's latest section.
+  const liveSection = sectionId || lastSectionId(courses.find((course) => course.id === courseId))
+  const liveTo = liveSection ? `/courses/${courseId}/sections/${liveSection}/live` : `/courses/${courseId}`
   return (
     <aside className="sidebar">
       <Link className="brand" to="/" aria-label="Course Replay 首页">
@@ -171,7 +234,9 @@ function Sidebar() {
       </Link>
       <nav className="nav-main">
         <NavItem to="/" end icon={<LayoutDashboard size={18} />} label="课程空间" />
+        <NavItem to={liveTo} icon={<Radio size={18} />} label="上课中" />
         <NavItem to={sectionId ? `${base}/replay` : `/courses/${courseId}`} icon={<BrainCircuit size={18} />} label="课堂重放" />
+        <NavItem to="/settings" icon={<UserRound size={18} />} label="我的" className="mobile-only" />
       </nav>
       <div className="sidebar-label">当前学期</div>
       <div className="semester-card">
@@ -182,17 +247,25 @@ function Sidebar() {
       <div className="sidebar-bottom">
         <NavItem to="/settings" icon={<Settings size={18} />} label="AI 与偏好设置" />
         <div className="profile">
-          <div className="avatar">CY</div>
-          <div><strong>学习者</strong><span>连续学习 7 天</span></div>
-          <MoreHorizontal size={17} />
+          <div className="avatar">{initialsOf(account.name)}</div>
+          <div><strong>{account.name}</strong><span className={`sync-label ${account.syncState}`}>{syncLabel(account)}</span></div>
+          <div className="material-menu-wrap profile-menu-wrap">
+            <button className="icon-button tiny" aria-label="账号操作" aria-expanded={menuOpen} onClick={() => setMenuOpen((value) => !value)}><MoreHorizontal size={17} /></button>
+            {menuOpen && <div className="material-menu profile-menu" onMouseLeave={() => setMenuOpen(false)}>
+              <button onClick={() => { setMenuOpen(false); account.rename() }}><PenLine size={14} />修改昵称</button>
+              {account.mode === 'account'
+                ? <button className="delete" onClick={() => { setMenuOpen(false); account.signOut() }}><LogOut size={14} />退出登录</button>
+                : <button onClick={() => { setMenuOpen(false); account.showLogin() }}><LogIn size={14} />登录 / 注册</button>}
+            </div>}
+          </div>
         </div>
       </div>
     </aside>
   )
 }
 
-function NavItem({ to, icon, label, end }: { to: string; icon: ReactNode; label: string; end?: boolean }) {
-  return <NavLink to={to} end={end} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>{icon}<span>{label}</span></NavLink>
+function NavItem({ to, icon, label, end, className }: { to: string; icon: ReactNode; label: string; end?: boolean; className?: string }) {
+  return <NavLink to={to} end={end} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''} ${className || ''}`}>{icon}<span>{label}</span></NavLink>
 }
 
 function PageHeader({ title, subtitle, actions }: { title: string; subtitle: string; actions?: ReactNode }) {
@@ -310,7 +383,7 @@ function useSection(courses: Course[]) {
 
 function SectionSubnav({ courseId, sectionId }: { courseId: string; sectionId: string }) {
   const base = `/courses/${courseId}/sections/${sectionId}`
-  return <div className="course-subnav"><NavLink end to={base}>材料与构建</NavLink><NavLink to={`${base}/replay`}>课堂重放</NavLink></div>
+  return <div className="course-subnav"><NavLink end to={base}>材料与构建</NavLink><NavLink to={`${base}/live`}>上课中</NavLink><NavLink to={`${base}/replay`}>课堂重放</NavLink></div>
 }
 
 function LegacySectionRedirect({ courses, suffix }: { courses: Course[]; suffix: string }) {
@@ -419,9 +492,7 @@ function SectionDetail({ courses, setCourses, notify }: { courses: Course[]; set
     const poll = async () => {
       while (active) {
         try {
-          const response = await fetch(`${API_BASE}/api/process/${jobId}`, { signal: controller.signal })
-          const job = await response.json().catch(() => ({}))
-          if (!response.ok) throw new Error(job.detail || `读取任务状态失败（HTTP ${response.status}）`)
+          const job = await apiFetch<any>(`/api/process/${jobId}`, { signal: controller.signal })
           if (!active) return
 
           updateSection(setCourses, courseId, sectionId, (current) => current.processingJob?.jobId === jobId ? {
@@ -533,10 +604,11 @@ function SectionDetail({ courses, setCourses, notify }: { courses: Course[]; set
     }))
     const formData = new FormData()
     staged.forEach((material) => { const file = stagedFilesRef.current.get(material.id); if (file) formData.append('files', file) })
+    // Questions asked during class go to the AI so the notes answer them where they belong.
+    const askedInClass = (section.classQuestions || []).map((item) => item.question.trim()).filter(Boolean)
+    if (askedInClass.length) formData.append('class_questions', JSON.stringify(askedInClass))
     try {
-      const response = await fetch(`${API_BASE}/api/process/start`, { method: 'POST', body: formData, signal: controller.signal })
-      const payload = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(payload.detail || `构建启动失败（HTTP ${response.status}）`)
+      const payload = await apiFetch<{ job_id: string }>('/api/process/start', { method: 'POST', body: formData, signal: controller.signal })
       updateSection(setCourses, course.id, section.id, (current) => ({ ...current, processingJob: { jobId: payload.job_id, materialIds, progress: 8, stage: 'queued', message: '文件已上传，等待处理', filesTotal: staged.length, filesDone: 0, pagesDone: 0, startedAt: Date.now() } }))
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
@@ -556,7 +628,7 @@ function SectionDetail({ courses, setCourses, notify }: { courses: Course[]; set
   const cancelBuild = async () => {
     uploadControllerRef.current?.abort()
     const job = section.processingJob
-    if (job?.jobId) void fetch(`${API_BASE}/api/process/${job.jobId}`, { method: 'DELETE' }).catch(() => undefined)
+    if (job?.jobId) void apiFetch(`/api/process/${job.jobId}`, { method: 'DELETE' }).catch(() => undefined)
     const ids = new Set(job?.materialIds || [])
     updateSection(setCourses, course.id, section.id, (current) => ({
       ...current,
@@ -588,7 +660,7 @@ function SectionDetail({ courses, setCourses, notify }: { courses: Course[]; set
 
   return <div className="page">
     <div className="back-row"><Link to={`/courses/${course.id}`}><ArrowLeft size={16} />{course.title}</Link><span>/</span><span>{section.title}</span></div>
-    <PageHeader title={section.title} subtitle={analysis ? trimText(analysis.summary, 150) : '上传本小节的文件，再点击“开始构建”，逐个文件分析生成分层讲稿。'} actions={analysis ? <Link className="button primary" to={`/courses/${course.id}/sections/${section.id}/replay`}><BrainCircuit size={17} />开始学习</Link> : undefined} />
+    <PageHeader title={section.title} subtitle={analysis ? trimText(analysis.summary, 150) : '上课时用「上课中」随时提问；课后上传本小节的文件，再点击“开始构建”生成分层讲稿。'} actions={<><Link className={`button ${analysis ? 'secondary' : 'primary'}`} to={`/courses/${course.id}/sections/${section.id}/live`}><Radio size={17} />{section.liveStartedAt && !section.liveEndedAt ? '回到课堂' : '上课中'}</Link>{analysis && <Link className="button primary" to={`/courses/${course.id}/sections/${section.id}/replay`}><BrainCircuit size={17} />开始学习</Link>}</>} />
     <SectionSubnav courseId={course.id} sectionId={section.id} />
     <div className="overview-strip"><div><span>材料</span><strong>{section.materials.length}</strong><small>本节文件</small></div><div><span>待构建</span><strong>{pendingCount}</strong><small>已暂存文件</small></div><div><span>知识点</span><strong>{section.knowledgeMap?.length || analysis?.key_concepts.length || 0}</strong><small>{analysis ? '来自本次构建' : '等待构建'}</small></div><div className="overview-action"><span>状态</span><strong>{section.status === 'ready' ? '已构建' : section.status === 'building' ? '构建中' : section.status === 'failed' ? '构建失败' : '待构建'}</strong><small>{analysis ? '可开始学习' : '仅处理本小节文件'}</small></div></div>
     <div className="materials-layout">
@@ -611,12 +683,12 @@ function SectionDetail({ courses, setCourses, notify }: { courses: Course[]; set
           {section.materials.map((material) => <div className="file-row" key={material.id}>
             <span className={`file-type ${material.type.toLowerCase()}`}><FileText size={18} /></span>
             <div className="file-info"><strong>{material.name}</strong><span title={material.error}>{material.error || material.meta}</span></div>
-            {material.previewUrl && <a className="file-preview-link" href={material.previewUrl} target="_blank" rel="noreferrer">查看文档</a>}
+            {material.previewUrl && <a className="file-preview-link" href={apiUrl(material.previewUrl)} target="_blank" rel="noreferrer">查看文档</a>}
             <div className={`status ${material.status}`}>{material.status === 'ready' ? <><CheckCircle2 size={15} />已就绪</> : material.status === 'failed' ? <><X size={14} />失败</> : material.status === 'cancelled' ? <><X size={14} />已取消</> : material.status === 'pending' ? <><Clock3 size={14} />待构建</> : <><RefreshCw size={14} />构建中{material.progress ? ` · ${material.progress}%` : ''}</>}</div>
             <div className="material-menu-wrap">
               <button className="icon-button tiny" aria-label={`${material.name} 操作`} aria-expanded={openMaterialMenu === material.id} onClick={() => setOpenMaterialMenu((current) => current === material.id ? null : material.id)}><MoreHorizontal size={17} /></button>
               {openMaterialMenu === material.id && <div className="material-menu">
-                {material.previewUrl && <a href={material.previewUrl} target="_blank" rel="noreferrer"><FileText size={14} />查看文档</a>}
+                {material.previewUrl && <a href={apiUrl(material.previewUrl)} target="_blank" rel="noreferrer"><FileText size={14} />查看文档</a>}
                 <button className="delete" onClick={() => removeMaterial(material.id)} disabled={building && material.status === 'processing'}><Trash2 size={14} />移除文件</button>
               </div>}
             </div>
@@ -625,6 +697,7 @@ function SectionDetail({ courses, setCourses, notify }: { courses: Course[]; set
       </section>
       <aside className="right-stack">
         <section className="panel knowledge-preview"><div className="panel-kicker"><Network size={16} />本节讲稿</div><h3>{analysis ? `${section.knowledgeMap?.length || learningSteps.length} 个知识节点 · ${conceptLabels.length} 个概念` : '等待构建'}</h3><div className="mini-tree"><span className="tree-root">{analysis?.title || section.title}</span><i /><div>{(learningSteps.slice(0, 3).map((step) => step.title).length ? learningSteps.slice(0, 3).map((step) => step.title) : ['上传文件', '开始构建', '开始学习']).map((step, index) => <span title={analysis?.learning_path[index]} key={`${step}-${index}`} className={index === 0 && analysis ? 'active' : ''}>{step}</span>)}</div></div>{analysis ? <Link to={`/courses/${course.id}/sections/${section.id}/replay`} className="text-link">查看完整讲稿 <ArrowRight size={15} /></Link> : <span className="text-link muted">构建后可查看</span>}</section>
+        <section className="panel knowledge-preview class-note-panel"><div className="panel-kicker"><MessageCircleQuestion size={16} />课堂提问</div><h3>{section.classQuestions?.length ? `${section.classQuestions.length} 个课上提问` : '上课时有疑问？'}</h3><p>{section.classQuestions?.length ? '已写进课后笔记；构建课件时会一并交给 AI，在相关知识点里补充解答。' : '打开「上课中」直接提问，AI 立即回答，问题会自动记下来，下课后出现在课堂重放的笔记里。'}</p><Link to={`/courses/${course.id}/sections/${section.id}/live`} className="text-link">{section.classQuestions?.length ? '查看课堂提问' : '进入上课中'} <ArrowRight size={15} /></Link></section>
         <section className="panel provider-note"><div className="provider-top"><span className="online-dot" />逐文件构建 · 内容隔离</div><p>每个小节只处理自己上传的文件，构建结果（讲稿、题目、聊天）不会与其它小节混用。图片与文档页面交给视觉模型，API Key 仅存服务端。</p><Link to="/settings">查看配置</Link></section>
       </aside>
     </div>
@@ -633,9 +706,11 @@ function SectionDetail({ courses, setCourses, notify }: { courses: Course[]; set
 
 function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses: Dispatch<SetStateAction<Course[]>>; notify: (message: string) => void }) {
   const { courseId = '', sectionId = '' } = useParams()
+  const location = useLocation()
   const course = courses.find((item) => item.id === courseId)
   const section = course?.sections.find((item) => item.id === sectionId)
-  const [selected, setSelected] = useState('')
+  // 下课 lands here focused on the in-class notes.
+  const [selected, setSelected] = useState(() => (location.state as { focus?: string } | null)?.focus || '')
   const [answer, setAnswer] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState(false)
   const [mastery, setMastery] = useState(() => loadMastery(sectionId, section?.mastery ?? 0))
@@ -650,26 +725,44 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
   const grouped = useMemo(() => TIER_ORDER.map((tier) => ({ tier, nodes: kmNodes.filter((node) => node.tier === tier) })).filter((group) => group.nodes.length), [kmNodes])
   const explorationNodes = section?.explorationNodes || []
   const chatHistory = section?.chatHistory || []
+  const classQuestions = section?.classQuestions || []
+  const isClassNode = (id: string) => id === CLASS_NOTES_ID ? classQuestions.length > 0 : classQuestions.some((item) => classNodeId(item) === id)
 
   useEffect(() => {
-    if (orderedNodes.length && !orderedNodes.some((node) => node.id === selected) && !explorationNodes.some((node) => node.id === selected)) {
+    if (orderedNodes.length && !orderedNodes.some((node) => node.id === selected) && !explorationNodes.some((node) => node.id === selected) && !isClassNode(selected)) {
       setSelected(orderedNodes[0].id)
     }
-  }, [orderedNodes, explorationNodes, selected])
+  })
+
+  // The 课上提问 group sits below the knowledge path; bring it into view when it's selected (e.g. right after 下课).
+  useEffect(() => {
+    if (selected !== CLASS_NOTES_ID && !selected.startsWith('class-')) return
+    const list = document.querySelector('.tier-scroll')
+    const node = list?.querySelector('.tier-class .active')
+    if (!list || !node) return
+    const box = list.getBoundingClientRect()
+    const target = node.getBoundingClientRect()
+    if (target.top < box.top || target.bottom > box.bottom) list.scrollTop += target.top - box.top - 24
+  }, [selected])
 
   if (!course || !section) return <NotFound />
 
   const activeIndex = orderedNodes.findIndex((node) => node.id === selected)
   const activeKnowledge = kmNodes.find((node) => node.id === selected)
   const activeExploration = explorationNodes.find((node) => node.id === selected)
+  const activeClassQuestion = classQuestions.find((item) => classNodeId(item) === selected)
+  const showClassNotes = selected === CLASS_NOTES_ID && classQuestions.length > 0
   const explorationAnswer = activeExploration ? (chatHistory.find((message) => message.role === 'assistant' && message.nodeId === activeExploration.id)?.content || '') : ''
   const activeContent = activeKnowledge ? activeKnowledge.content
     : activeExploration ? `## ${activeExploration.title}\n\n> ❓ ${normalizeMarkdown(activeExploration.question)}\n\n${explorationAnswer ? normalizeMarkdown(explorationAnswer) : '_正在生成回答…_'}`
+    : showClassNotes ? classNotesMarkdown(section)
+    : activeClassQuestion ? classQuestionMarkdown(activeClassQuestion, section)
     : (orderedNodes[0]?.content || '## 等待材料分析\n\n上传课件后将在这里生成结构化的学习内容。')
-  const currentTitle = activeKnowledge?.title || activeExploration?.title || orderedNodes[Math.max(activeIndex, 0)]?.title || section.analysis?.title || section.title
-  const activeTier = activeKnowledge?.tier
-  const tierLabel = activeKnowledge ? TIER_META[activeKnowledge.tier].label : activeExploration ? '探索支线' : '知识节点'
-  const tierEyebrow = activeKnowledge ? TIER_META[activeKnowledge.tier].eyebrow : 'EXPLORATION'
+  const classTitle = showClassNotes ? '课堂提问笔记' : activeClassQuestion ? trimText(activeClassQuestion.question, 28) : ''
+  const currentTitle = activeKnowledge?.title || activeExploration?.title || classTitle || orderedNodes[Math.max(activeIndex, 0)]?.title || section.analysis?.title || section.title
+  const activeTier = activeKnowledge?.tier || (classTitle ? 'class' : undefined)
+  const tierLabel = activeKnowledge ? TIER_META[activeKnowledge.tier].label : activeExploration ? '探索支线' : classTitle ? '课上提问' : '知识节点'
+  const tierEyebrow = activeKnowledge ? TIER_META[activeKnowledge.tier].eyebrow : classTitle ? 'IN-CLASS · 上课中' : 'EXPLORATION'
   const progressPct = orderedNodes.length ? Math.max(8, ((Math.max(activeIndex, 0) + 1) / orderedNodes.length) * 100) : 8
   const generatedQuestion = section.analysis?.review_questions[0]
 
@@ -699,10 +792,8 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
       chatHistory: [...(current.chatHistory || []), { id: userMessageId, role: 'user' as const, content: question }],
     }))
     try {
-      const response = await fetch(`${API_BASE}/api/study/ask`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const payload = await apiFetch<any>('/api/study/ask', {
+        json: {
           question,
           course_title: `${course.title} · ${section.title}`,
           current_topic: currentTitle,
@@ -710,10 +801,8 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
           learning_path: section.analysis?.learning_path || kmNodes.map((node) => node.title),
           key_concepts: section.analysis?.key_concepts || course.tags,
           existing_nodes: [...kmNodes.map((node) => node.title), ...explorationNodes.map((node) => node.title)],
-        }),
+        },
       })
-      const payload = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(payload.detail || `AI 回答失败（HTTP ${response.status}）`)
       const nodeId = payload.add_node && payload.node_title ? `branch-${Date.now()}` : undefined
       updateSection(setCourses, course.id, section.id, (current) => ({
         ...current,
@@ -756,9 +845,19 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
               })}
             </div>
           </section>)}
+          {classQuestions.length > 0 && <section className="tier-group tier-class">
+            <header className="tier-label"><span className="tier-dot" /><div><small>IN-CLASS · 上课中</small><strong>课上提问</strong></div><span className="tier-count">{classQuestions.length}</span></header>
+            <div className="tier-nodes"><div className="tier-node-wrap">
+              <button className={`km-node ${showClassNotes ? 'active' : ''}`} onClick={() => setSelected(CLASS_NOTES_ID)}>
+                <span className="km-step"><NotebookPen size={13} /></span>
+                <span className="km-text"><strong>课堂提问笔记</strong><small>{classQuestions.length} 个问题{section.liveStartedAt ? ` · ${formatClock(section.liveStartedAt)} 开始` : ''}</small></span>
+              </button>
+              {classQuestions.map((item) => <button key={item.id} className={`km-branch class-branch ${selected === classNodeId(item) ? 'active' : ''}`} onClick={() => setSelected(classNodeId(item))}><MessageCircleQuestion size={12} /><span>{item.question}</span></button>)}
+            </div></div>
+          </section>}
           {asking && <div className="km-pending"><span className="mini-spinner" />正在判断是否扩展支线…</div>}
         </div>
-        <div className="topology-legend"><span><i className="t-prereq" />前置</span><span><i className="t-core" />核心</span><span><i className="t-advanced" />进阶</span><span><i className="t-branch" />问答支线</span></div>
+        <div className="topology-legend"><span><i className="t-prereq" />前置</span><span><i className="t-core" />核心</span><span><i className="t-advanced" />进阶</span><span><i className="t-branch" />问答支线</span>{classQuestions.length > 0 && <span><i className="t-class" />课上提问</span>}</div>
         <div className="path-tip"><Lightbulb size={16} /><p>内容按「前置 → 核心 → 进阶」分层。点击节点切换学习焦点，向 AI 提问会自动长出探索支线。</p></div>
       </aside>
 
@@ -766,7 +865,7 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
         <div className="content-toolbar"><div><span className={`tier-badge tier-${activeTier || 'branch'}`}>{tierLabel}</span><strong>{currentTitle}</strong></div><span>{section.materials[0]?.name || (section.analysis ? '已完成构建' : '等待构建')}</span></div>
         <div className="reading-stage">
           <article className="reading-paper">
-            <div className="reading-index"><span>{String(Math.max(activeIndex, 0) + 1).padStart(2, '0')}</span><em>{tierEyebrow} · 学习路径</em></div>
+            <div className="reading-index"><span>{classTitle ? 'Q' : String(Math.max(activeIndex, 0) + 1).padStart(2, '0')}</span><em>{tierEyebrow} · {classTitle ? '课后笔记' : '学习路径'}</em></div>
             <Markdown>{activeContent}</Markdown>
           </article>
         </div>
@@ -787,6 +886,223 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
         </div>
         <div className="ask-box"><div className="quick-prompts"><button onClick={() => setChat(`换一个类比解释“${currentTitle}”`)}>换个类比</button><button onClick={() => setChat(`基于“${currentTitle}”给我一道变式题`)}>来道变式</button><button onClick={() => setChat(`学习“${currentTitle}”前需要补什么基础？`)}>探索前置知识</button></div><div className="ask-input"><textarea value={chat} disabled={asking} onChange={(e) => setChat(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void ask() } }} placeholder="针对当前节点追问；必要时会自动扩展左侧拓扑…" /><button onClick={() => void ask()} disabled={!chat.trim() || asking}>{asking ? <RefreshCw className="spin-icon" size={16} /> : <Send size={17} />}</button></div><small>AI 会判断问题是否值得成为新的知识节点</small></div>
       </aside>
+    </div>
+  </div>
+}
+
+const CLASS_NOTES_ID = 'class-notes'
+const classNodeId = (item: ClassQuestion) => `class-${item.id}`
+
+function formatClock(timestamp: number) {
+  const date = new Date(timestamp)
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+function formatTimer(milliseconds: number) {
+  const total = Math.max(0, Math.floor(milliseconds / 1000))
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = total % 60
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return hours ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`
+}
+
+/** "14:17 · 第 12 分钟 · 讲到：傅里叶变换" */
+function classQuestionMeta(item: ClassQuestion, startedAt?: number) {
+  const parts = [formatClock(item.askedAt)]
+  if (startedAt && item.askedAt >= startedAt) parts.push(`第 ${Math.floor((item.askedAt - startedAt) / 60000) + 1} 分钟`)
+  if (item.topic) parts.push(`讲到：${item.topic}`)
+  return parts.join(' · ')
+}
+
+function classAnswerMarkdown(item: ClassQuestion) {
+  if (item.status === 'answering') return '_回答生成中…_'
+  if (item.status === 'failed') return `_上课时没能拿到回答：${item.answer || '请求失败'}_`
+  return normalizeMarkdown(item.answer)
+}
+
+const quoteLines = (text: string) => text.split('\n').map((line) => `> ${line}`).join('\n')
+
+function classQuestionMarkdown(item: ClassQuestion, section: Section) {
+  return `## 课上提问\n\n${quoteLines(`❓ ${item.question}`)}\n\n*${classQuestionMeta(item, section.liveStartedAt)}*\n\n${classAnswerMarkdown(item)}`
+}
+
+/** After-class note: every question asked during class with its answer. */
+function classNotesMarkdown(section: Section) {
+  const questions = section.classQuestions || []
+  const start = section.liveStartedAt
+  const range = start ? `${formatClock(start)}${section.liveEndedAt ? `–${formatClock(section.liveEndedAt)}` : ' 开始'}` : ''
+  const parts = [
+    '## 课堂提问笔记',
+    `> 本节课共提出 **${questions.length}** 个问题${range ? `，上课时间 ${range}` : ''}。以下是上课时 AI 的即时解答，可以在右侧向 AI 讲师继续追问。`,
+  ]
+  questions.forEach((item, index) => {
+    parts.push(`### ${index + 1}. ${item.question.replace(/\s+/g, ' ').trim()}`)
+    parts.push(`*${classQuestionMeta(item, start)}*`)
+    parts.push(classAnswerMarkdown(item))
+  })
+  return parts.join('\n\n')
+}
+
+const LIVE_FOLLOW_UPS = ['没听懂，换个说法', '举个具体例子', '这个公式怎么来的？', '和前面讲的有什么联系？']
+
+/**
+ * 上课中: ask while the lecture is running. Each question is answered right
+ * away, logged with its time in the class, and later shown in 课堂重放's notes.
+ */
+function LiveClass({ courses, setCourses, notify }: { courses: Course[]; setCourses: Dispatch<SetStateAction<Course[]>>; notify: (message: string) => void }) {
+  const { course, section } = useSection(courses)
+  const navigate = useNavigate()
+  const [draft, setDraft] = useState('')
+  const [topic, setTopic] = useState(section?.liveTopic || '')
+  const [focusId, setFocusId] = useState<string | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+  const feedRef = useRef<HTMLDivElement>(null)
+  const questions = section?.classQuestions || []
+  const live = Boolean(section?.liveStartedAt && !section?.liveEndedAt)
+
+  useEffect(() => {
+    if (!live) return
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [live])
+
+  useEffect(() => {
+    const feed = feedRef.current
+    if (feed) feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' })
+  }, [questions.length])
+
+  if (!course || !section) return <NotFound />
+
+  const patch = (updater: (current: Section) => Section) => updateSection(setCourses, course.id, section.id, updater)
+  const patchQuestion = (id: string, changes: Partial<ClassQuestion>) => patch((current) => ({
+    ...current,
+    classQuestions: (current.classQuestions || []).map((item) => item.id === id ? { ...item, ...changes } : item),
+  }))
+
+  const startClass = () => {
+    patch((current) => ({ ...current, liveStartedAt: current.liveStartedAt ?? Date.now(), liveEndedAt: undefined }))
+    notify('开始上课：有问题直接问')
+  }
+  const endClass = () => {
+    patch((current) => ({ ...current, liveEndedAt: Date.now(), liveTopic: topic.trim() || current.liveTopic }))
+    notify(questions.length ? `已下课：${questions.length} 个课堂提问已写进课后笔记` : '已下课')
+    navigate(`/courses/${course.id}/sections/${section.id}/replay`, { state: { focus: CLASS_NOTES_ID } })
+  }
+  const saveTopic = () => {
+    const clean = topic.trim()
+    if (clean !== (section.liveTopic || '')) patch((current) => ({ ...current, liveTopic: clean || undefined }))
+  }
+
+  const requestAnswer = async (id: string, question: string, currentTopic: string, history: ClassQuestion[]) => {
+    try {
+      const payload = await apiFetch<{ answer: string }>('/api/class/ask', {
+        json: {
+          question,
+          course_title: course.title,
+          section_title: section.title,
+          current_topic: currentTopic,
+          summary: section.analysis?.summary || course.description || '',
+          key_concepts: section.analysis?.key_concepts || [],
+          recent: history.filter((item) => item.status === 'answered').slice(-3).map((item) => ({ question: item.question, answer: item.answer })),
+        },
+      })
+      patchQuestion(id, { status: 'answered', answer: payload.answer, answeredAt: Date.now() })
+    } catch (error) {
+      patchQuestion(id, { status: 'failed', answer: error instanceof Error ? error.message : 'AI 回答失败' })
+    }
+  }
+
+  const ask = (text?: string) => {
+    const question = (text ?? draft).trim()
+    if (!question) return
+    const askedAt = Date.now()
+    const currentTopic = topic.trim()
+    const item: ClassQuestion = { id: `cq-${askedAt}-${Math.random().toString(36).slice(2, 6)}`, question, answer: '', topic: currentTopic || undefined, status: 'answering', askedAt }
+    if (text === undefined) setDraft('')
+    setFocusId(null)
+    patch((current) => ({
+      ...current,
+      liveStartedAt: current.liveStartedAt ?? askedAt,
+      liveTopic: currentTopic || current.liveTopic,
+      classQuestions: [...(current.classQuestions || []), item],
+    }))
+    void requestAnswer(item.id, question, currentTopic, questions)
+  }
+
+  const retry = (item: ClassQuestion) => {
+    patchQuestion(item.id, { status: 'answering', answer: '' })
+    void requestAnswer(item.id, item.question, item.topic || '', questions.filter((other) => other.askedAt < item.askedAt))
+  }
+
+  const removeQuestion = (item: ClassQuestion) => {
+    if (!window.confirm('从课堂提问记录中删除这个问题？')) return
+    patch((current) => ({ ...current, classQuestions: (current.classQuestions || []).filter((other) => other.id !== item.id) }))
+  }
+
+  const focusQuestion = (id: string) => {
+    setFocusId(id)
+    document.getElementById(`live-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  const startedAt = section.liveStartedAt
+  const status = live ? 'live' : section.liveEndedAt ? 'ended' : 'idle'
+
+  return <div className="replay-page live-page">
+    <div className="replay-topbar live-topbar">
+      <Link to={`/courses/${course.id}/sections/${section.id}`}><ArrowLeft size={16} />{section.title}</Link>
+      <div className={`live-status ${status}`}>
+        {status === 'live' ? <><span className="live-dot" />上课中<b>{formatTimer(now - (startedAt || now))}</b></>
+          : status === 'ended' ? <>已下课<b>{startedAt && section.liveEndedAt ? `共 ${formatTimer(section.liveEndedAt - startedAt)}` : ''}</b></>
+          : <>{course.title} · 未开始</>}
+      </div>
+      <div className="replay-actions">
+        {live
+          ? <button className="button primary compact" onClick={endClass}><Square size={13} />下课 · 看课后笔记</button>
+          : <button className="button primary compact" onClick={startClass}><Play size={13} />{section.liveEndedAt ? '继续上课' : '开始上课'}</button>}
+      </div>
+    </div>
+    <div className="live-grid">
+      <aside className="path-column live-log">
+        <div className="path-head"><span className="eyebrow">IN-CLASS QUESTIONS</span><h2>课堂提问记录</h2><div><span>{questions.length} 个问题</span><span>{startedAt ? `${formatClock(startedAt)} 开始` : '尚未开始'}</span></div></div>
+        <div className="live-log-list">
+          {questions.length === 0 && <div className="live-log-empty">还没有提问。听不懂的地方直接在右边问，问题会按时间记在这里。</div>}
+          {questions.map((item, index) => <div className="live-log-row" key={item.id}>
+            <button className={`km-node live-log-item ${focusId === item.id ? 'active' : ''} ${item.status}`} onClick={() => focusQuestion(item.id)}>
+              <span className="km-step">{String(index + 1).padStart(2, '0')}</span>
+              <span className="km-text"><strong>{item.question}</strong><small>{item.status === 'answering' ? '回答中…' : item.status === 'failed' ? '回答失败 · 可重试' : classQuestionMeta(item, startedAt)}</small></span>
+            </button>
+            <button className="live-log-delete" aria-label="删除这个问题" onClick={() => removeQuestion(item)}><X size={12} /></button>
+          </div>)}
+        </div>
+        <div className="path-tip"><NotebookPen size={16} /><p>下课后，这些提问和回答会出现在「课堂重放」的课后笔记里；课后构建课件时也会交给 AI，在相关知识点里补充解答。</p></div>
+      </aside>
+      <section className="live-main">
+        <label className="live-topic"><span>老师正在讲</span><input value={topic} onChange={(event) => setTopic(event.target.value)} onBlur={saveTopic} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} placeholder="例如：傅里叶变换的性质（选填，AI 会结合它回答）" maxLength={120} /></label>
+        <div className="live-feed" ref={feedRef}>
+          {questions.length === 0 ? <div className="live-welcome">
+            <span className="ai-avatar"><MessageCircleQuestion size={20} /></span>
+            <h2>上课听不懂？直接问。</h2>
+            <p>AI 会马上用几句话讲明白，不打断你继续听课。每个问题都会自动记下来，下课后整理进「课堂重放」的笔记。</p>
+            {!startedAt && <button className="button primary" onClick={startClass}><Play size={15} />开始上课</button>}
+          </div> : questions.map((item, index) => <article className={`live-qa ${focusId === item.id ? 'focused' : ''}`} id={`live-${item.id}`} key={item.id}>
+            <div className="live-q"><span>#{index + 1} · {classQuestionMeta(item, startedAt)}</span><p>{item.question}</p></div>
+            <div className={`ai-message live-a ${item.status}`}>
+              {item.status === 'answering'
+                ? <div className="live-thinking"><span className="mini-spinner" />正在回答…</div>
+                : item.status === 'failed'
+                  ? <div className="live-failed"><p>{item.answer || 'AI 回答失败'}</p><button onClick={() => retry(item)}><RefreshCw size={12} />重试</button></div>
+                  : <Markdown className="on-dark">{normalizeMarkdown(item.answer)}</Markdown>}
+            </div>
+          </article>)}
+        </div>
+        <div className="ask-box live-ask">
+          {questions.length > 0 && <div className="quick-prompts">{LIVE_FOLLOW_UPS.map((prompt) => <button key={prompt} onClick={() => ask(prompt)}>{prompt}</button>)}</div>}
+          <div className="ask-input"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); ask() } }} placeholder="哪里没听懂？直接问，Enter 发送" /><button onClick={() => ask()} disabled={!draft.trim()} aria-label="发送"><Send size={17} /></button></div>
+          <small>回答马上显示 · 问题自动记入课堂提问，下课后进入课后笔记</small>
+        </div>
+      </section>
     </div>
   </div>
 }
@@ -821,14 +1137,14 @@ function Progress({ courses }: { courses: Course[] }) {
   return <div className="page"><div className="back-row"><Link to={`/courses/${course.id}/sections/${section.id}`}><ArrowLeft size={16} />{section.title}</Link></div><PageHeader title="我的学习" subtitle="看见每一次真正理解，也看见下一步该往哪里走。" /><SectionSubnav courseId={course.id} sectionId={section.id} /><section className="progress-hero"><div><span className="eyebrow">OVERALL MASTERY</span><strong>{mastery}%</strong><p>本小节掌握度 · 最近 7 天提升 15%</p></div><div className="trend-chart">{bars.map((bar, index) => <span key={index} style={{ height: `${bar}%` }}><i>{index === bars.length - 1 ? `${bar}%` : ''}</i></span>)}</div><div className="streak"><span><Zap size={18} /></span><strong>7 天</strong><small>连续学习</small></div></section><div className="progress-grid"><section className="panel"><div className="section-heading compact"><div><h2>{analysis ? '材料学习路径' : '知识点掌握'}</h2><p>{analysis ? '来自本小节已保存的 AI 分析' : '按优先级排序'}</p></div></div><div className="mastery-list">{progressNodes.map((node) => <div key={node.id}><span>{node.title}<small>{node.mastery >= 75 ? '已掌握' : node.mastery > 0 ? '继续巩固' : '待学习'}</small></span><div><i style={{ width: `${node.mastery}%` }} /></div><strong>{node.mastery}%</strong></div>)}</div></section><section className="panel weakness-panel"><div className="section-heading compact"><div><h2>优先补强</h2><p>{analysis ? '来自材料关键概念' : '来自错题与探索记录'}</p></div></div>{weakConcepts.map((concept, index) => <div className="weak-item" key={`${concept}-${index}`}><span className={`priority ${index === 0 ? 'high' : 'mid'}`}>{index === 0 ? '高' : '中'}</span><div><strong>{concept}</strong><p>{analysis ? '建议在课堂重放中结合原文查看' : '来自历史学习记录'}</p></div><Link to={`/courses/${course.id}/sections/${section.id}/replay`}>去复习</Link></div>)}<div className="branch-summary"><Network size={18} /><div><strong>{analysis?.learning_path.length || 3} 个学习阶段</strong><p>学习内容已和本小节材料关联。</p></div></div></section></div></div>
 }
 
-function SettingsPage({ notify }: { notify: (message: string) => void }) {
+function SettingsPage({ notify, account }: { notify: (message: string) => void; account: AccountView }) {
   const [checking, setChecking] = useState(false)
   const [health, setHealth] = useState<{ configured: boolean; base_url: string; model: string | null; office_conversion: boolean } | null>(null)
 
   const checkServer = async (showNotice = true) => {
     setChecking(true)
     try {
-      const response = await fetch(`${API_BASE}/api/health`)
+      const response = await fetch(apiUrl('/api/health'))
       if (!response.ok) throw new Error('API 服务不可用')
       const payload = await response.json()
       setHealth(payload)
@@ -843,7 +1159,7 @@ function SettingsPage({ notify }: { notify: (message: string) => void }) {
 
   useEffect(() => { void checkServer(false) }, [])
 
-  return <div className="page settings-page"><PageHeader title="AI 与偏好设置" subtitle="模型配置仅保存在服务端；浏览器不会读取或显示完整密钥。" /><div className="settings-grid"><section className="panel settings-section"><div className="settings-head"><span className="settings-icon"><Bot size={20} /></span><div><h2>CheapRouter · OpenAI-compatible</h2><p>直接读取整页图片，不经过 OCR</p></div><span className={`status ${health?.configured ? 'ready' : 'failed'}`}><span className="online-dot" />{health?.configured ? '已配置' : health ? '待配置' : '后端离线'}</span></div><label>Base URL<input value={health?.base_url || 'https://cdn.cheaprouter.cc/v1'} readOnly /></label><div className="field-row"><label>Chat Model<input value={health?.model || ''} readOnly placeholder="在 .env 填写 OPENAI_CHAT_MODEL" /></label><label>Office 文件转换<input value={health?.office_conversion ? 'Microsoft Office / LibreOffice 已就绪' : '未检测到 Office 转换器'} readOnly /></label></div><label>API Key<div className="secret-field"><input value={health?.configured ? '••••••••••••••••••••••••' : ''} readOnly placeholder="在 .env 填写 CHEAPROUTER_API_KEY" /><span>仅服务端可见</span></div></label><div className="settings-actions"><button className="button secondary" disabled={checking} onClick={() => void checkServer()}>{checking ? <RefreshCw className="spin-icon" size={16} /> : <CheckCircle2 size={16} />}{checking ? '检查中' : '检查服务端配置'}</button></div></section><aside className="panel privacy-card"><span><Zap size={20} /></span><h3>整页视觉模式</h3><p>图片直接发送；PDF 渲染为逐页图片；PPTX/DOCX 先转 PDF，再把每一页作为高细节图片交给模型。</p><div><Check size={15} />不执行 OCR</div><div><Check size={15} />密钥不会进入浏览器</div><div><Check size={15} />模型名称由你在 .env 指定</div></aside></div></div>
+  return <div className="page settings-page"><PageHeader title="AI 与偏好设置" subtitle="模型配置仅保存在服务端；浏览器不会读取或显示完整密钥。" /><section className="panel account-panel"><div className="avatar">{initialsOf(account.name)}</div><div className="account-info"><strong>{account.name}</strong><span>{account.mode === 'account' ? `@${account.username} · ${syncLabel(account)}` : syncLabel(account)}</span><p>{account.mode === 'account' ? '课程、课堂提问、笔记和学习进度都保存在服务器数据库里，换设备登录即可继续。' : '离线模式：数据只保存在这个浏览器里。登录后可以把这些数据导入账号。'}</p></div><div className="account-actions"><button className="button secondary" onClick={account.rename}><PenLine size={15} />修改昵称</button>{account.mode === 'account' ? <button className="button danger" onClick={account.signOut}><LogOut size={15} />退出登录</button> : <button className="button primary" onClick={account.showLogin}><LogIn size={15} />登录 / 注册</button>}</div></section><div className="settings-grid"><section className="panel settings-section"><div className="settings-head"><span className="settings-icon"><Bot size={20} /></span><div><h2>CheapRouter · OpenAI-compatible</h2><p>直接读取整页图片，不经过 OCR</p></div><span className={`status ${health?.configured ? 'ready' : 'failed'}`}><span className="online-dot" />{health?.configured ? '已配置' : health ? '待配置' : '后端离线'}</span></div><label>Base URL<input value={health?.base_url || 'https://cdn.cheaprouter.cc/v1'} readOnly /></label><div className="field-row"><label>Chat Model<input value={health?.model || ''} readOnly placeholder="在 .env 填写 OPENAI_CHAT_MODEL" /></label><label>Office 文件转换<input value={health?.office_conversion ? 'Microsoft Office / LibreOffice 已就绪' : '未检测到 Office 转换器'} readOnly /></label></div><label>API Key<div className="secret-field"><input value={health?.configured ? '••••••••••••••••••••••••' : ''} readOnly placeholder="在 .env 填写 CHEAPROUTER_API_KEY" /><span>仅服务端可见</span></div></label><div className="settings-actions"><button className="button secondary" disabled={checking} onClick={() => void checkServer()}>{checking ? <RefreshCw className="spin-icon" size={16} /> : <CheckCircle2 size={16} />}{checking ? '检查中' : '检查服务端配置'}</button></div></section><aside className="panel privacy-card"><span><Zap size={20} /></span><h3>整页视觉模式</h3><p>图片直接发送；PDF 渲染为逐页图片；PPTX/DOCX 先转 PDF，再把每一页作为高细节图片交给模型。</p><div><Check size={15} />不执行 OCR</div><div><Check size={15} />密钥不会进入浏览器</div><div><Check size={15} />模型名称由你在 .env 指定</div></aside></div></div>
 }
 
 function NotFound() { return <div className="not-found"><BrainCircuit size={40} /><h1>这个学习节点还不存在</h1><p>先回到课程空间选择一门课程吧。</p><Link className="button primary" to="/">返回首页</Link></div> }
