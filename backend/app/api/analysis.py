@@ -63,6 +63,8 @@ class VisualJob:
     current_file: str | None = None
     pages_total: int = 0
     pages_done: int = 0
+    batches_total: int = 0
+    batches_done: int = 0
     # Who started the build; only they can read its status, result and files.
     owner_id: str | None = None
 
@@ -85,6 +87,8 @@ def _status(job: VisualJob) -> VisualJobStatus:
         current_file=job.current_file,
         pages_total=job.pages_total,
         pages_done=job.pages_done,
+        batches_total=job.batches_total,
+        batches_done=job.batches_done,
     )
 
 
@@ -177,12 +181,21 @@ async def _run_visual_job(
             if prepared
             else "AI 正在根据课堂转写整理笔记"
         )
+        def batch_progress(done: int, total: int) -> None:
+            job.batches_done, job.batches_total = done, total
+            job.progress = 58 + round(done / max(total, 1) * 28)
+            job.message = f"AI 正在分批阅读 {total_pages} 页（已完成 {done}/{total} 批）"
+
         analysis, usage = await analyze_materials(
             prepared,
             AIProvider(ai_settings),
             class_questions=class_questions,
             transcript=transcript,
             language=language,
+            max_pages_per_request=settings.max_pages_per_ai_request,
+            pages_per_batch=settings.pages_per_batch,
+            concurrency=settings.ai_batch_concurrency,
+            on_progress=batch_progress,
         )
 
         job.stage = "finalizing"

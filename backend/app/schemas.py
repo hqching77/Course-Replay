@@ -150,6 +150,9 @@ class VisualJobStatus(BaseModel):
     current_file: str | None = None
     pages_total: int = 0
     pages_done: int = 0
+    # Long material is read by the AI in batches; 0 when it fits in one request.
+    batches_total: int = 0
+    batches_done: int = 0
 
 
 class StudyAskRequest(BaseModel):
@@ -331,6 +334,8 @@ class WorkspaceSection(CamelModel):
     live_topic: str | None = None
     auto_title: bool | None = None
     transcript: list[WorkspaceTranscriptSegment] | None = Field(default=None, max_length=5000)
+    # Study activity: knowledge points studied, last position, minutes per day (dashboard stats).
+    study: dict[str, Any] | None = None
 
 
 class WorkspaceCourse(CamelModel):

@@ -1,4 +1,5 @@
 import { t } from './i18n'
+import type { SectionStudy } from './study'
 
 export type MaterialStatus = 'uploading' | 'pending' | 'ready' | 'processing' | 'failed' | 'cancelled'
 
@@ -107,6 +108,9 @@ export interface ProcessingJob {
   currentFile?: string
   pagesTotal?: number
   pagesDone?: number
+  /** Long material is read by the AI in batches. */
+  batchesTotal?: number
+  batchesDone?: number
   startedAt?: number
 }
 
@@ -187,6 +191,8 @@ export interface Section {
   transcript?: TranscriptSegment[]
   /** Title was generated; it is replaced by the AI's title after the first build. */
   autoTitle?: boolean
+  /** Real study activity (studied knowledge points, time per day) — see study.ts. */
+  study?: SectionStudy
 }
 
 export interface Course {
@@ -607,12 +613,6 @@ function migrateCourse(raw: LegacyCourse): Course {
     accent: raw.accent || '#c7f45d',
     sections: [section],
   }
-}
-
-export function courseMastery(course: Course): number {
-  const scored = course.sections.filter((section) => typeof section.mastery === 'number')
-  if (!scored.length) return course.mastery || 0
-  return Math.round(scored.reduce((sum, section) => sum + (section.mastery || 0), 0) / scored.length)
 }
 
 export function loadCourses(): Course[] {

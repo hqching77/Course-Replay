@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+from collections.abc import Callable
 from typing import Any
 
 from app.schemas import AnalysisKnowledgeNode, CourseMaterialAnalysis
@@ -59,6 +61,15 @@ knowledge_map（@@NODE 列表）要求（最重要）：
 - title 与 summary 必须是纯文本，公式只放正文。
 
 默认使用简体中文。"""
+
+# Long documents: the AI first reads the pages in batches and writes faithful page-by-page
+# notes, then builds the lecture from those notes. No page limit; cost grows with pages.
+DIGEST_PROMPT = """你在帮讲师备课。下面是课堂材料中的一批页面图像，每页前标有文件名和页码。
+请逐页把教学内容完整整理成文字笔记，之后会用这些笔记汇总成讲稿：
+- 每页以「### 《文件名》第 N 页」开头；
+- 写出标题、要点、定义、定理、公式（LaTeX：行内 $...$，独立公式 $$...$$）、例题及完整解题步骤、代码（用代码块）、图表表达的含义；
+- 忠实于页面：不要编造，不要省略例题、公式和代码；纯装饰或空白页写「（无教学内容）」；
+- 只输出笔记本身，默认使用简体中文。"""
 
 VALID_TIERS = {"prereq", "core", "advanced"}
 
@@ -203,6 +214,11 @@ async def analyze_materials(
     class_questions: list[str] | None = None,
     transcript: str = "",
     language: str = "zh",
+    *,
+    max_pages_per_request: int = 40,
+    pages_per_batch: int = 20,
+    concurrency: int = 3,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> tuple[CourseMaterialAnalysis, dict[str, Any] | None]:
     intro = "请完整分析下面所有课堂材料，像讲师一样把每个知识点讲透（含例子），并组合成一条连贯的分层学习路径。"
     if class_questions:
@@ -216,7 +232,61 @@ async def analyze_materials(
             "Use '### Questions from class' instead of '### 课上疑问'."
         )
     content: list[dict[str, Any]] = [{"type": "text", "text": intro}]
-    for document in documents:
-        content.extend(document.content_parts)
+    text_parts, pages = _split_pages(documents)
+    if len(pages) <= max_pages_per_request:
+        for document in documents:
+            content.extend(document.content_parts)
+        raw, usage = await provider.analyze_visual_materials(content, system_prompt=SYSTEM_PROMPT, max_tokens=8000)
+        return _parse_analysis(raw), usage
+
+    batches = [pages[start:start + pages_per_batch] for start in range(0, len(pages), pages_per_batch)]
+    done = 0
+    limit = asyncio.Semaphore(max(1, concurrency))
+
+    async def read_batch(batch: list[list[dict[str, Any]]]) -> tuple[str, dict[str, Any] | None]:
+        nonlocal done
+        async with limit:
+            parts = [part for page in batch for part in page]
+            notes, batch_usage = await provider.analyze_visual_materials(parts, system_prompt=DIGEST_PROMPT, max_tokens=8000)
+        done += 1
+        if on_progress:
+            on_progress(done, len(batches))
+        return notes, batch_usage
+
+    if on_progress:
+        on_progress(0, len(batches))
+    results = await asyncio.gather(*(read_batch(batch) for batch in batches))
+    content[0]["text"] += (
+        f"\n\n材料共 {len(pages)} 页，篇幅较长，已先逐页整理成下面的文字笔记（保留了公式、例题和代码）。"
+        "请据此完整讲授，不要因为是笔记而省略内容。"
+    )
+    content.extend(text_parts)
+    for index, (notes, _) in enumerate(results, start=1):
+        content.append({"type": "text", "text": f"\n\n【逐页笔记 · 第 {index}/{len(results)} 部分】\n\n{notes}"})
     raw, usage = await provider.analyze_visual_materials(content, system_prompt=SYSTEM_PROMPT, max_tokens=8000)
-    return _parse_analysis(raw), usage
+    return _parse_analysis(raw), _merge_usage([batch_usage for _, batch_usage in results] + [usage])
+
+
+def _split_pages(documents: list[PreparedVisualDocument]) -> tuple[list[dict[str, Any]], list[list[dict[str, Any]]]]:
+    """Separate plain-text material from page images (each page keeps its 《file》第 N 页 label)."""
+    text_parts: list[dict[str, Any]] = []
+    pages: list[list[dict[str, Any]]] = []
+    for document in documents:
+        pending: list[dict[str, Any]] = []
+        for part in document.content_parts:
+            if part.get("type") == "image_url":
+                pages.append([*pending, part])
+                pending = []
+            else:
+                pending.append(part)
+        text_parts.extend(pending)
+    return text_parts, pages
+
+
+def _merge_usage(usages: list[dict[str, Any] | None]) -> dict[str, Any] | None:
+    total: dict[str, Any] = {}
+    for usage in usages:
+        for key, value in (usage or {}).items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                total[key] = total.get(key, 0) + value
+    return total or None

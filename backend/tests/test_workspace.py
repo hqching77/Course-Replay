@@ -44,6 +44,7 @@ def demo_section(**overrides):
             {"id": "t1", "text": "今天讲文件权限。", "startedAt": 1730000005000, "endedAt": 1730000012000},
             {"id": "t2", "text": "chmod 改权限。", "startedAt": 1730000013000},
         ],
+        "study": {"studied": ["kn-1"], "lastNodeId": "kn-1", "lastAt": 1730003000000, "review": {"2024-10-27": 540}},
     }
     section.update(overrides)
     return {"courseId": "programming-linux", "position": 0, "section": section}
@@ -78,6 +79,7 @@ def test_workspace_round_trip(client):
     assert [seg["text"] for seg in section["transcript"]] == ["今天讲文件权限。", "chmod 改权限。"]
     assert section["transcript"][0]["endedAt"] == 1730000012000 and "endedAt" not in section["transcript"][1]
     assert "processingJob" not in section
+    assert section["study"] == {"studied": ["kn-1"], "lastNodeId": "kn-1", "lastAt": 1730003000000, "review": {"2024-10-27": 540}}
 
 
 def test_section_put_replaces_children(client):
@@ -153,5 +155,5 @@ def test_added_columns_are_created_on_old_databases(tmp_path):
     ensure_added_columns(engine)
     ensure_added_columns(engine)  # idempotent
     inspector = inspect(engine)
-    assert "auto_title" in {c["name"] for c in inspector.get_columns("study_sections")}
+    assert {"auto_title", "study"} <= {c["name"] for c in inspector.get_columns("study_sections")}
     assert "upload_id" in {c["name"] for c in inspector.get_columns("study_materials")}

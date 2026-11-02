@@ -93,6 +93,7 @@ def _section_out(section: StudySection) -> WorkspaceSection:
         live_ended_at=section.live_ended_ms,
         live_topic=section.live_topic,
         auto_title=section.auto_title,
+        study=section.study,
         transcript=[
             WorkspaceTranscriptSegment(id=item.client_id, text=item.text, started_at=item.started_ms, ended_at=item.ended_ms)
             for item in section.transcript
@@ -201,6 +202,7 @@ def put_section(
     section.live_ended_ms = data.live_ended_at
     section.live_topic = data.live_topic
     section.auto_title = data.auto_title
+    section.study = data.study
     # Child lists are small and always sent whole, so replace them wholesale.
     section.materials = [
         StudyMaterial(

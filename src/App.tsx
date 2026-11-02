@@ -42,19 +42,21 @@ import {
   Zap,
 } from 'lucide-react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { Course, CourseAnalysis, KnowledgeNode, KnowledgeTier, Section, TIER_META, courseMastery, createSection, deriveKnowledgeMap, knowledgeNodes, loadMastery, normalizeMarkdown, saveMastery } from './data'
+import { Course, CourseAnalysis, KnowledgeNode, KnowledgeTier, Section, TIER_META, createSection, deriveKnowledgeMap, knowledgeNodes, loadMastery, normalizeMarkdown, saveMastery } from './data'
 import { apiFetch, openProtectedFile } from './api'
 import { AccountView, syncLabel } from './account'
 import { AuthScreen, SplashScreen } from './AuthScreen'
 import { addMaterialFiles, autoSectionTitle, buildInputs, forgetStagedFile, startSectionBuild, titleFromAnalysis } from './build'
 import { CLASS_NOTES_ID, classNodeId, classNotesMarkdown, classQuestionMarkdown, formatClock, transcriptMarkdown } from './classNotes'
-import { LanguageToggle, t, useLang } from './i18n'
+import { LanguageToggle, getLang, t, useLang } from './i18n'
 import { LiveProvider, useLive, useStartLiveClass } from './live'
 import { LiveChooser, LiveClass } from './LiveClass'
 import { SessionControls, displayNameOf, initialsOf, useSession } from './session'
 import { SettingsPage } from './SettingsPage'
 import { Markdown, NotFound, PageHeader, formatConceptLabel, trimText, updateSection } from './ui'
 import { useCourseStore } from './workspace'
+import { Semester, defaultSemester, isCustomSemester, saveSemester, semesterName, semesterWeek, useSemester } from './semester'
+import { courseActivity, courseProgress, lastStudied, markStudied, pendingNodes, recordReview, sectionNodes, sectionProgress, weekStudy } from './study'
 
 const TIER_ORDER: KnowledgeTier[] = ['prereq', 'core', 'advanced']
 const TRANSCRIPT_NODE_ID = 'class-transcript'
@@ -195,11 +197,7 @@ function Sidebar({ courses, account }: { courses: Course[]; account: AccountView
         <NavItem to="/settings" icon={<UserRound size={18} />} label={t('我的')} className="mobile-only" />
       </nav>
       <div className="sidebar-label">{t('当前学期')}</div>
-      <div className="semester-card">
-        <div className="semester-row"><span>{t('2026 秋')}</span><ChevronDown size={15} /></div>
-        <div className="semester-progress"><span style={{ width: '58%' }} /></div>
-        <small>{t('第 8 周 · 共 16 周')}</small>
-      </div>
+      <SemesterCard />
       <div className="sidebar-bottom">
         <LanguageToggle className="sidebar-lang" />
         <NavItem to="/settings" icon={<Settings size={18} />} label={t('AI 与偏好设置')} />
@@ -221,51 +219,148 @@ function Sidebar({ courses, account }: { courses: Course[]; account: AccountView
   )
 }
 
+/** Current semester and week, computed from the week-1 Monday (editable here, kept in this browser). */
+function SemesterCard() {
+  const semester = useSemester()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState<Semester>(semester)
+  const { label, fraction } = semesterWeek(semester)
+  const open = () => { setDraft({ ...semester, name: semester.name || '' }); setEditing((value) => !value) }
+  const save = (event: FormEvent) => {
+    event.preventDefault()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.start)) return
+    saveSemester({ start: draft.start, weeks: Math.min(30, Math.max(1, Math.round(Number(draft.weeks) || 16))), name: draft.name?.trim() || undefined })
+    setEditing(false)
+  }
+  return <div className={`semester-card ${editing ? 'editing' : ''}`}>
+    <button type="button" className="semester-row" onClick={open} aria-expanded={editing}><span>{semesterName(semester)}</span><ChevronDown size={15} /></button>
+    <div className="semester-progress"><span style={{ width: `${Math.round(fraction * 100)}%` }} /></div>
+    <small>{label}</small>
+    {editing && <form className="semester-form" onSubmit={save}>
+      <label>{t('第 1 周的周一')}<input type="date" required value={draft.start} onChange={(event) => setDraft({ ...draft, start: event.target.value })} /></label>
+      <label>{t('共几周')}<input type="number" min={1} max={30} required value={draft.weeks} onChange={(event) => setDraft({ ...draft, weeks: Number(event.target.value) })} /></label>
+      <label>{t('学期名称')}<input value={draft.name || ''} placeholder={semesterName({ ...draft, name: '' })} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
+      <div className="semester-actions">
+        {isCustomSemester() && <button type="button" className="text-button" onClick={() => { saveSemester(null); setDraft(defaultSemester()); setEditing(false) }}>{t('恢复默认')}</button>}
+        <button type="submit" className="button primary compact">{t('保存')}</button>
+      </div>
+    </form>}
+  </div>
+}
+
 function NavItem({ to, icon, label, end, className, badge }: { to: string; icon: ReactNode; label: string; end?: boolean; className?: string; badge?: ReactNode }) {
   return <NavLink to={to} end={end} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''} ${className || ''}`}>{icon}<span>{label}</span>{badge}</NavLink>
 }
 
 const COURSE_GRID_CAP = 6
 
+function greeting(hour = new Date().getHours()) {
+  if (hour >= 23 || hour < 5) return t('夜深了，还在学习吗？')
+  if (hour < 11) return t('早上好，准备继续吗？')
+  if (hour < 13) return t('中午好，准备继续吗？')
+  if (hour < 18) return t('下午好，准备继续吗？')
+  return t('晚上好，准备继续吗？')
+}
+
+function formatStudyTime(seconds: number) {
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+}
+
+function relativeDay(time: number) {
+  const start = (value: number) => { const date = new Date(value); return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime() }
+  const days = Math.round((start(Date.now()) - start(time)) / 86_400_000)
+  if (days <= 0) return t('今天')
+  if (days === 1) return t('昨天')
+  if (days < 7) return t('{n} 天前', { n: days })
+  return new Date(time).toLocaleDateString(getLang() === 'en' ? 'en-US' : 'zh-CN', { month: 'short', day: 'numeric' })
+}
+
+/** "Continue where you left off": the most recently studied section, or a first step. */
+function ContinueCard({ courses, onCreate }: { courses: Course[]; onCreate: () => void }) {
+  const last = lastStudied(courses)
+  const firstWithNotes = courses.flatMap((course) => course.sections.filter((section) => sectionNodes(section).length).map((section) => ({ course, section })))[0]
+  const focus = last && sectionNodes(last.section).length ? last : firstWithNotes ? { ...firstWithNotes, at: 0 } : last
+  let pill = t('开始使用')
+  let title = t('创建你的第一门课程')
+  let subtitle = t('每门课按小节记录：上课实时转写、随时提问，下课一键生成笔记。')
+  let progress: { label: string; value: string; percent?: number } | null = null
+  let action = <button className="button light" onClick={onCreate}>{t('创建课程')} <ArrowRight size={17} /></button>
+  let labels = [t('笔记'), t('课件'), t('转写'), t('提问')]
+  if (focus) {
+    const { course, section } = focus
+    const nodes = sectionNodes(section)
+    pill = focus.at ? t('继续上次学习') : t('开始学习')
+    if (nodes.length) {
+      const studied = new Set(section.study?.studied || [])
+      const current = nodes.find((node) => node.id === section.study?.lastNodeId) || nodes.find((node) => !studied.has(node.id)) || nodes[0]
+      const stats = sectionProgress(section)!
+      const index = nodes.indexOf(current)
+      const around = [...nodes.slice(index + 1), ...nodes.slice(0, index)].slice(0, 3)
+      title = current.title
+      subtitle = `${course.title} · ${section.title}`
+      progress = { label: t('学习进度'), value: `${stats.done} / ${stats.total}`, percent: stats.percent }
+      action = <Link className="button light" to={`/courses/${course.id}/sections/${section.id}/replay`} state={{ focus: current.id }}>{focus.at ? t('继续课堂重放') : t('开始课堂重放')} <ArrowRight size={17} /></Link>
+      labels = [current.title, ...around.map((node) => node.title)]
+    } else {
+      title = section.title
+      subtitle = course.title
+      const lines = section.transcript?.length || 0
+      progress = { label: t('还没有生成笔记'), value: lines ? t('{n} 段转写', { n: lines }) : t('{n} 份材料', { n: section.materials.length }) }
+      action = <Link className="button light" to={`/courses/${course.id}/sections/${section.id}`}>{t('去生成笔记')} <ArrowRight size={17} /></Link>
+    }
+  } else if (courses.length) {
+    pill = t('开始第一节课')
+    title = courses[0].title
+    subtitle = t('进入课程点「开始上课」，实时转写、随时提问，下课一键生成笔记。')
+    action = <Link className="button light" to={`/courses/${courses[0].id}`}>{t('进入课程')} <ArrowRight size={17} /></Link>
+  }
+  const [main, a, b, c] = labels
+  return <section className="hero-card">
+    <div className="hero-copy">
+      <span className="pill lime"><Zap size={13} />{pill}</span>
+      <h2>{title}</h2>
+      <p>{subtitle}</p>
+      {progress && <><div className="hero-progress-row"><span>{progress.label}</span><strong>{progress.value}</strong></div>
+        {progress.percent !== undefined && <div className="hero-progress"><span style={{ width: `${Math.max(progress.percent, 2)}%` }} /></div>}</>}
+      {action}
+    </div>
+    <div className="hero-visual" aria-hidden="true">
+      <div className="orbit orbit-one" /><div className="orbit orbit-two" />
+      <div className="hero-node main-node" title={main}><BrainCircuit size={29} /><span>{main}</span></div>
+      {a && <div className="hero-node node-a" title={a}>{a}</div>}
+      {b && <div className="hero-node node-b" title={b}>{b}</div>}
+      {c && <div className="hero-node node-c" title={c}>{c}</div>}
+      {a && <span className="connector connector-a" />}{b && <span className="connector connector-b" />}{c && <span className="connector connector-c" />}
+    </div>
+  </section>
+}
+
 function Dashboard({ courses, setCourses, notify }: PageProps) {
   const [showCreate, setShowCreate] = useState(false)
   const [showAllCourses, setShowAllCourses] = useState(false)
   const navigate = useNavigate()
-  const avg = Math.round(courses.reduce((sum, item) => sum + courseMastery(item), 0) / Math.max(courses.length, 1))
-  const lead = courses[0]
-  const leadReplay = lead && firstSectionId(lead) ? `/courses/${lead.id}/sections/${firstSectionId(lead)}/replay` : lead ? `/courses/${lead.id}` : '/'
+  const sectionCount = courses.reduce((sum, course) => sum + course.sections.length, 0)
+  const withNotes = courses.filter((course) => course.sections.some((section) => sectionNodes(section).length))
+  const avg = withNotes.length ? Math.round(withNotes.reduce((sum, course) => sum + courseProgress(course), 0) / withNotes.length) : 0
+  const nodes = pendingNodes(courses)
+  const week = weekStudy(courses)
   return (
     <div className="page dashboard-page">
       <PageHeader
-        title={t('下午好，准备继续吗？')}
+        title={greeting()}
         subtitle={t('把散落的课件与笔记，重新串成一条能真正掌握的学习路径。')}
         actions={<><button className="icon-button" aria-label={t('搜索')}><Search size={19} /></button><button className="button primary" onClick={() => setShowCreate(true)}><Plus size={18} />{t('创建课程')}</button></>}
       />
 
-      <section className="hero-card">
-        <div className="hero-copy">
-          <span className="pill lime"><Zap size={13} />{t('继续上次学习')}</span>
-          <h2>{t('Shell、终端与命令执行')}</h2>
-          <p>{t('计算机程序设计基础（1）· 补充材料 1')}</p>
-          <div className="hero-progress-row"><span>{t('课程进度')}</span><strong>3 / 5</strong></div>
-          <div className="hero-progress"><span style={{ width: '58%' }} /></div>
-          <Link className="button light" to={leadReplay}>{t('继续课堂重放')} <ArrowRight size={17} /></Link>
-        </div>
-        <div className="hero-visual" aria-hidden="true">
-          <div className="orbit orbit-one" /><div className="orbit orbit-two" />
-          <div className="hero-node main-node"><BrainCircuit size={29} /><span>{t('化简')}</span></div>
-          <div className="hero-node node-a">A · B</div>
-          <div className="hero-node node-b">A + B</div>
-          <div className="hero-node node-c">K-map</div>
-          <span className="connector connector-a" /><span className="connector connector-b" /><span className="connector connector-c" />
-        </div>
-      </section>
+      <ContinueCard courses={courses} onCreate={() => setShowCreate(true)} />
 
       <section className="metric-grid">
-        <Metric icon={<Library size={18} />} label={t('进行中的课程')} value={String(courses.length)} delta={t('本学期')} />
-        <Metric icon={<Gauge size={18} />} label={t('平均掌握度')} value={`${avg}%`} delta={t('较上周 +6%')} positive />
-        <Metric icon={<Clock3 size={18} />} label={t('本周学习')} value="4h 28m" delta={t('目标 6 小时')} />
-        <Metric icon={<Target size={18} />} label={t('待攻克知识点')} value="7" delta={t('其中 3 个高优先级')} />
+        <Metric icon={<Library size={18} />} label={t('进行中的课程')} value={String(courses.length)} delta={t('共 {n} 个小节', { n: sectionCount })} />
+        <Metric icon={<Gauge size={18} />} label={t('平均学习进度')} value={nodes.total ? `${avg}%` : '—'} delta={nodes.total ? t('已学 {done} / {total} 个知识点', { done: nodes.studied, total: nodes.total }) : t('生成笔记后开始统计')} positive={nodes.studied > 0} />
+        <Metric icon={<Clock3 size={18} />} label={t('本周学习')} value={formatStudyTime(week.total)} delta={week.total ? t('上课 {a} · 复习 {b}', { a: formatStudyTime(week.inClass), b: formatStudyTime(week.review) }) : t('本周还没有学习记录')} />
+        <Metric icon={<Target size={18} />} label={t('待攻克知识点')} value={String(nodes.pending)} delta={nodes.pending ? t('其中 {n} 个核心知识点', { n: nodes.pendingCore }) : nodes.total ? t('全部学过了') : t('生成笔记后出现')} />
       </section>
 
       <section className="section-block">
@@ -287,7 +382,8 @@ function Metric({ icon, label, value, delta, positive }: { icon: ReactNode; labe
 }
 
 function CourseCard({ course, onDelete, onRename }: { course: Course; onDelete: () => void; onRename: () => void }) {
-  const displayedMastery = courseMastery(course)
+  const displayedMastery = courseProgress(course)
+  const lastActive = courseActivity(course)
   const stats = courseStats(course)
   const [menuOpen, setMenuOpen] = useState(false)
   return (
@@ -296,12 +392,13 @@ function CourseCard({ course, onDelete, onRename }: { course: Course; onDelete: 
       <div className="course-code">{t(course.code)}</div><h3>{course.title}</h3><p>{courseSubtitle(course)}</p>
       <div className="tag-row">{course.tags.map((tag, index) => <span key={`${tag}-${index}`} title={tag}>{formatConceptLabel(t(tag))}</span>)}</div>
       <div className="card-divider" />
-      <div className="course-footer"><div><span>{t('{sections} 个小节 · {materials} 份材料', { sections: stats.sections, materials: stats.materials })}</span><small>{t('最近学习 {when}', { when: t(course.updated || '刚刚') })}</small></div><div className="ring" style={{ '--value': `${displayedMastery * 3.6}deg`, '--accent': course.accent } as React.CSSProperties}><span>{displayedMastery}%</span></div></div>
+      <div className="course-footer"><div><span>{t('{sections} 个小节 · {materials} 份材料', { sections: stats.sections, materials: stats.materials })}</span><small>{lastActive ? t('最近学习 {when}', { when: relativeDay(lastActive) }) : t('还没开始学习')}</small></div><div className="ring" style={{ '--value': `${displayedMastery * 3.6}deg`, '--accent': course.accent } as React.CSSProperties}><span>{displayedMastery}%</span></div></div>
     </Link>
   )
 }
 
 function CreateCourseModal({ onClose, onCreate }: { onClose: () => void; onCreate: (course: Course) => void }) {
+  const semester = useSemester()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const submit = (event: FormEvent) => {
@@ -309,7 +406,7 @@ function CreateCourseModal({ onClose, onCreate }: { onClose: () => void; onCreat
     if (!title.trim()) return
     // Random id: ids are stored unencrypted, so they must not contain the course name.
     const id = `course-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    onCreate({ id, title: title.trim(), description: description.trim() || t('一门新的课程，等待新建小节。'), code: t('NEW · 2026 秋'), tags: [t('新课程')], mastery: 0, updated: t('刚刚'), accent: '#c7f45d', sections: [] })
+    onCreate({ id, title: title.trim(), description: description.trim() || t('一门新的课程，等待新建小节。'), code: `NEW · ${semesterName(semester)}`, tags: [t('新课程')], mastery: 0, updated: t('刚刚'), accent: '#c7f45d', sections: [] })
   }
   return <div className="modal-backdrop" onMouseDown={onClose}><form className="modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">NEW COURSE</span><h2>{t('创建一门课程')}</h2></div><button type="button" className="icon-button" aria-label={t('关闭')} onClick={onClose}><X size={18} /></button></div><label>{t('课程名称')}<input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('例如：数字信号处理')} /></label><label>{t('课程简介')}<textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('这门课主要学习什么？')} /></label><div className="modal-actions"><button type="button" className="button ghost" onClick={onClose}>{t('取消')}</button><button className="button primary" disabled={!title.trim()}>{t('创建课程')} <ArrowRight size={16} /></button></div></form></div>
 }
@@ -371,13 +468,12 @@ function CourseSections({ courses, setCourses, notify }: PageProps) {
       <div><span>{t('小节')}</span><strong>{course.sections.length}</strong><small>{t('个独立单元')}</small></div>
       <div><span>{t('材料')}</span><strong>{stats.materials}</strong><small>{t('份课堂资料')}</small></div>
       <div><span>{t('知识点')}</span><strong>{stats.stages}</strong><small>{t('跨全部小节')}</small></div>
-      <div className="overview-action"><span>{t('整体掌握')}</span><strong>{courseMastery(course)}%</strong><small>{t('各小节平均')}</small></div>
+      <div className="overview-action"><span>{t('学习进度')}</span><strong>{courseProgress(course)}%</strong><small>{t('各小节平均')}</small></div>
     </div>
     <section className="section-block">
       <div className="section-heading"><div><h2>{t('课程小节')}</h2><p>{t('「开始上课」会自动新建一节课并开始听课；也可以只上传课件生成笔记')}</p></div></div>
       <div className="course-grid section-grid">
         {course.sections.map((section) => <SectionCard key={section.id} courseId={course.id} section={section} live={live.state.sectionId === section.id && live.state.status !== 'idle'} onDelete={() => deleteSection(section.id)} onRename={() => renameSection(section.id, section.title)} />)}
-        <button className="new-course-card live-start-card" onClick={() => startLiveClass(course)}><span><Mic size={22} /></span><strong>{t('开始上课')}</strong><small>{t('一键开始听课：实时转写、随时提问')}</small></button>
         <button className="new-course-card" onClick={createSectionAndOpen}><span><Plus size={22} /></span><strong>{t('新建小节')}</strong><small>{t('只上传课件，生成笔记')}</small></button>
       </div>
     </section>
@@ -389,12 +485,13 @@ function SectionCard({ courseId, section, live, onDelete, onRename }: { courseId
   const stageCount = section.knowledgeMap?.length || section.analysis?.learning_path.length || 0
   const [menuOpen, setMenuOpen] = useState(false)
   const lines = section.transcript?.length || 0
+  const studied = sectionProgress(section)
   return <Link to={live ? `/courses/${courseId}/sections/${section.id}/live` : `/courses/${courseId}/sections/${section.id}`} className="course-card section-card">
     <div className="course-card-top">{live ? <span className="section-status live"><span className="live-dot" />{t('上课中')}</span> : <span className={`section-status ${section.status}`}>{sectionStatusLabel(section)}</span>}<div className="material-menu-wrap"><button className="icon-button tiny" aria-label={t('小节操作')} aria-expanded={menuOpen} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setMenuOpen((value) => !value) }}><MoreHorizontal size={16} /></button>{menuOpen && <div className="material-menu" onMouseLeave={() => setMenuOpen(false)}><button onClick={(event) => { event.preventDefault(); event.stopPropagation(); setMenuOpen(false); onRename() }}><FileText size={14} />{t('重命名')}</button><button className="delete" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setMenuOpen(false); onDelete() }}><Trash2 size={14} />{t('删除小节')}</button></div>}</div></div>
     <h3>{section.title}</h3>
     <p>{section.analysis ? trimText(section.analysis.summary, 92) : lines ? t('已转写 {n} 段课堂内容，下课后可生成笔记。', { n: lines }) : t('上传文件并点击“开始构建”，生成本节的分层讲稿与题目。')}</p>
     <div className="card-divider" />
-    <div className="course-footer"><div><span>{t('{materials} 份材料 · {stages} 个知识点', { materials: section.materials.length, stages: stageCount })}</span><small>{ready ? t('可开始学习') : section.status === 'building' ? t('正在构建…') : t('等待构建')}</small></div>{ready && <span className="section-go"><ArrowRight size={16} /></span>}</div>
+    <div className="course-footer"><div><span>{t('{materials} 份材料 · {stages} 个知识点', { materials: section.materials.length, stages: stageCount })}</span><small>{ready ? (studied?.done ? t('已学 {done} / {total} 个知识点', { done: studied.done, total: studied.total }) : t('可开始学习')) : section.status === 'building' ? t('正在构建…') : t('等待构建')}</small></div>{ready && <span className="section-go"><ArrowRight size={16} /></span>}</div>
   </Link>
 }
 
@@ -438,7 +535,7 @@ function SectionDetail({ courses, setCourses, notify }: PageProps) {
 
           updateSection(setCourses, courseId, sectionId, (current) => current.processingJob?.jobId === jobId ? {
             ...current,
-            processingJob: { ...current.processingJob!, progress: job.progress || 0, stage: job.stage || 'queued', message: job.message || '', filesTotal: job.files_total, filesDone: job.files_done, currentFile: job.current_file, pagesTotal: job.pages_total, pagesDone: job.pages_done },
+            processingJob: { ...current.processingJob!, progress: job.progress || 0, stage: job.stage || 'queued', message: job.message || '', filesTotal: job.files_total, filesDone: job.files_done, currentFile: job.current_file, pagesTotal: job.pages_total, pagesDone: job.pages_done, batchesTotal: job.batches_total, batchesDone: job.batches_done },
             materials: current.materials.map((material) => materialIds.includes(material.id) ? { ...material, progress: job.progress || 0 } : material),
           } : current)
 
@@ -586,7 +683,8 @@ function SectionDetail({ courses, setCourses, notify }: PageProps) {
   const pagesLine = processingJob?.pagesTotal ? t('已构建 {done} / {total} 页', { done: processingJob.pagesDone || 0, total: processingJob.pagesTotal }) : (processingJob?.pagesDone ? t('已构建 {done} 页', { done: processingJob.pagesDone }) : '')
   const headline = !processingJob ? t('正在准备构建')
     : stageKey === 'rendering' ? (processingJob.currentFile ? t('正在逐页渲染 {file}', { file: processingJob.currentFile }) : t('正在逐页渲染'))
-      : stageKey === 'model' ? (processingJob.filesTotal ? t('AI 正在分析 {n} 个文件和课堂转写', { n: processingJob.filesTotal }) : t('AI 正在根据课堂转写整理笔记'))
+      : stageKey === 'model' ? (processingJob.batchesTotal ? (processingJob.batchesDone === processingJob.batchesTotal ? t('AI 正在把 {pages} 页的笔记汇总成讲稿', { pages: processingJob.pagesTotal || 0 }) : t('AI 正在分批阅读 {pages} 页（{done}/{total} 批）', { pages: processingJob.pagesTotal || 0, done: processingJob.batchesDone || 0, total: processingJob.batchesTotal }))
+        : processingJob.filesTotal ? t('AI 正在分析 {n} 个文件和课堂转写', { n: processingJob.filesTotal }) : t('AI 正在根据课堂转写整理笔记'))
         : stageKey === 'finalizing' ? t('正在整理学习路径与关键概念') : t('已提交，等待处理')
   const elapsedSec = processingJob?.startedAt ? Math.max(0, (nowTs - processingJob.startedAt) / 1000) : 0
   const estPages = processingJob?.pagesTotal || (processingJob?.filesTotal || pendingCount || 1) * 8
@@ -640,6 +738,59 @@ function SectionDetail({ courses, setCourses, notify }: PageProps) {
   </div>
 }
 
+const STUDY_TICK = 5
+/** A knowledge point counts as studied after this much active reading. */
+const STUDIED_AFTER = 20
+const FLUSH_EVERY = 60
+const IDLE_AFTER = 90_000
+
+/**
+ * Records real study activity in 课堂重放: time spent per day (only while the tab is
+ * visible and the user is active) and which knowledge points were actually read.
+ */
+function useStudyTracker(courseId: string, sectionId: string, nodeId: string, isKnowledge: boolean, setCourses: SetCourses) {
+  const state = useRef({ pending: 0, nodeSeconds: 0, node: nodeId, isKnowledge, lastActivity: Date.now() })
+  useEffect(() => {
+    state.current.node = nodeId
+    state.current.isKnowledge = isKnowledge
+    state.current.nodeSeconds = 0
+  }, [nodeId, isKnowledge])
+  useEffect(() => {
+    if (!courseId || !sectionId) return
+    const tracked = state.current
+    const flush = () => {
+      if (tracked.pending <= 0) return
+      const seconds = tracked.pending
+      const node = tracked.isKnowledge ? tracked.node : undefined
+      tracked.pending = 0
+      updateSection(setCourses, courseId, sectionId, (current) => recordReview(current, seconds, node))
+    }
+    const active = () => { tracked.lastActivity = Date.now() }
+    const events = ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'] as const
+    events.forEach((name) => window.addEventListener(name, active, { passive: true, capture: true }))
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible' || Date.now() - tracked.lastActivity > IDLE_AFTER) return
+      tracked.pending += STUDY_TICK
+      if (tracked.isKnowledge && tracked.node) {
+        tracked.nodeSeconds += STUDY_TICK
+        if (tracked.nodeSeconds >= STUDIED_AFTER && tracked.nodeSeconds - STUDY_TICK < STUDIED_AFTER) {
+          const node = tracked.node
+          updateSection(setCourses, courseId, sectionId, (current) => markStudied(current, node))
+        }
+      }
+      if (tracked.pending >= FLUSH_EVERY) flush()
+    }, STUDY_TICK * 1000)
+    const onHidden = () => { if (document.visibilityState === 'hidden') flush() }
+    document.addEventListener('visibilitychange', onHidden)
+    return () => {
+      window.clearInterval(timer)
+      events.forEach((name) => window.removeEventListener(name, active, { capture: true }))
+      document.removeEventListener('visibilitychange', onHidden)
+      flush()
+    }
+  }, [courseId, sectionId, setCourses])
+}
+
 function Replay({ courses, setCourses, notify }: PageProps) {
   const lang = useLang()
   const { courseId = '', sectionId = '' } = useParams()
@@ -686,6 +837,9 @@ function Replay({ courses, setCourses, notify }: PageProps) {
     const target = node.getBoundingClientRect()
     if (target.top < box.top || target.bottom > box.bottom) list.scrollTop += target.top - box.top - 24
   }, [selected])
+
+  const hasRealNotes = Boolean(section?.knowledgeMap?.length || section?.analysis?.learning_path.length)
+  useStudyTracker(course?.id || '', section?.id || '', selected, hasRealNotes && kmNodes.some((node) => node.id === selected), setCourses)
 
   if (!course || !section) return <NotFound />
 

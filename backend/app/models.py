@@ -251,6 +251,8 @@ class StudySection(Base):
     live_topic: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
     # Title was generated (e.g. "第 3 讲 · 11月2日"); replaced by the AI title after the first build.
     auto_title: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Study activity (studied knowledge points, last position, time per day), as the browser sends it.
+    study: Mapped[dict | None] = mapped_column(EncryptedJSON, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
     )

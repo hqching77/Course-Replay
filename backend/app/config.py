@@ -17,7 +17,11 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/course_replay.db"
     artifacts_dir: Path = Path("./data/artifacts")
     max_upload_mb: int = 100
-    max_pages_per_file: int = 40
+    # No page limit. Up to this many pages go to the AI in one request; longer material is
+    # read in batches of PAGES_PER_BATCH (in parallel), then summarised into the lecture.
+    max_pages_per_ai_request: int = 40
+    pages_per_batch: int = 20
+    ai_batch_concurrency: int = 3
     document_render_dpi: int = 110
     cors_origins: str = "http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173,http://127.0.0.1:5173"
 

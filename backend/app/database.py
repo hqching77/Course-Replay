@@ -37,7 +37,7 @@ def get_db() -> Generator[Session, None, None]:
 # Columns added after their table first shipped. create_all() never alters an
 # existing table, so add them here (nullable, so no backfill is needed).
 ADDED_COLUMNS: dict[str, dict[str, str]] = {
-    "study_sections": {"auto_title": "BOOLEAN"},
+    "study_sections": {"auto_title": "BOOLEAN", "study": "JSON"},
     "study_materials": {"upload_id": "VARCHAR(36)"},
 }
 

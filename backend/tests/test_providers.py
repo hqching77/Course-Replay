@@ -162,7 +162,7 @@ def test_transcribe_rejects_oversized_audio(client, stt_calls, headers, monkeypa
 def analyzer_calls(monkeypatch, chat_calls):
     calls = []
 
-    async def fake_analyze(documents, provider, class_questions=None, transcript="", language="zh"):
+    async def fake_analyze(documents, provider, class_questions=None, transcript="", language="zh", **_):
         calls.append({"files": [d.filename for d in documents], "questions": class_questions,
                       "transcript": transcript, "language": language, "model": provider.settings.openai_chat_model})
         return CourseMaterialAnalysis(title="傅里叶变换", summary="课堂笔记"), None

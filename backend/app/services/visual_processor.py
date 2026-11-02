@@ -124,10 +124,6 @@ def _convert_office_to_pdf(source: Path, output_dir: Path) -> Path:
 def _render_pdf(pdf_path: Path, source_name: str, settings: Settings) -> list[dict[str, Any]]:
     document = fitz.open(pdf_path)
     try:
-        if len(document) > settings.max_pages_per_file:
-            raise VisualProcessingError(
-                f"{source_name} 有 {len(document)} 页，超过每份文件 {settings.max_pages_per_file} 页的上限。"
-            )
         scale = settings.document_render_dpi / 72
         matrix = fitz.Matrix(scale, scale)
         parts: list[dict[str, Any]] = []
