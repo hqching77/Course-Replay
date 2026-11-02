@@ -12,6 +12,7 @@ export interface User {
   username: string
   display_name: string
   created_at: string
+  preferences?: { semester?: { start: string; weeks: number; name?: string } }
 }
 
 export class ApiError extends Error {
@@ -135,6 +136,7 @@ export const authApi = {
     apiFetch<AuthResponse>('/api/auth/login', { json: { username, password } }),
   me: () => apiFetch<User>('/api/auth/me'),
   rename: (displayName: string) => apiFetch<User>('/api/auth/me', { method: 'PATCH', json: { display_name: displayName } }),
+  savePreferences: (preferences: User['preferences'] | { semester: null }) => apiFetch<User>('/api/auth/me', { method: 'PATCH', json: { preferences } }),
   logout: () => apiFetch<void>('/api/auth/logout', { method: 'POST' }),
 }
 

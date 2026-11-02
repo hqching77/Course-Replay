@@ -11,8 +11,7 @@ const en = new Function(`${enSource.replace(/export const EN[^=]*=/, 'return ')}
 // Keys passed to t() through variables (data, presets, server messages).
 const INDIRECT = [
   '前置知识', '核心知识点', '进阶应用', 'CORE · 按讲课逻辑',
-  '路径与文件系统', '常用文件操作命令', 'Shell、终端与命令执行', '用户、用户组与权限', 'Shell 脚本与环境变量',
-  '前置知识', '核心概念', '当前章节', '待学习', '拓展',
+  '前置知识', '核心概念',
   '没听懂，换个说法', '举个具体例子', '这个公式怎么来的？', '和前面讲的有什么联系？',
   '硅基流动 SiliconFlow', '阿里云百炼 DashScope', '硅基流动 SenseVoice', '自定义', 'free', 'text-only',
   '登录已过期，请重新登录', '暂时连不上服务器。可以稍后重试，或先用离线模式。', '已退出登录',

@@ -180,6 +180,8 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(64))
     password_hash: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    # Small per-account settings that should follow the user across devices (e.g. the semester).
+    preferences: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     sessions: Mapped[list["AuthSession"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"

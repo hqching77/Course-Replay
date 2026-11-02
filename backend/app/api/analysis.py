@@ -447,7 +447,13 @@ answer 字段内的段落之间保留空行，步骤或并列要点使用有序�
 换一种说法、简单澄清、重复提问、生成练习题时不要新增节点。node_title 不得与已有节点重复。
 当 allow_new_dialog 为 true，且问题与课程、当前节点和当前对话主题明显无关时，new_dialog 必须为 true，并给出简短 dialog_title。
 仅仅是从当前知识点自然延伸、追问课程相关概念时不要开启新对话。当 new_dialog 为 true 时，add_node 必须为 false。
-当 allow_new_dialog 为 false 时，new_dialog 必须为 false。""" + language_rule(reply_language(http_request))
+当 allow_new_dialog 为 false 时，new_dialog 必须为 false。
+current_content 是学生此刻正在看的讲稿内容，回答要与它一致、可以引用其中的例子。"""
+    if request.mode == "grade":
+        system_prompt += """
+这次 question 是学生对一道自测题的回答。请批改：先给出判断（正确 / 部分正确 / 不正确）和 10 分制得分，
+再指出答对的要点和遗漏或错误之处，最后给出简洁的参考答案要点。add_node 和 new_dialog 都必须为 false。"""
+    system_prompt += language_rule(reply_language(http_request))
     context = {
         "course_title": request.course_title,
         "current_topic": request.current_topic,
@@ -456,6 +462,7 @@ answer 字段内的段落之间保留空行，步骤或并列要点使用有序�
         "key_concepts": request.key_concepts,
         "existing_nodes": request.existing_nodes,
         "current_dialog_title": request.current_dialog_title,
+        "current_content": request.current_content,
         "allow_new_dialog": request.allow_new_dialog,
         "question": request.question,
     }
@@ -476,6 +483,8 @@ answer 字段内的段落之间保留空行，步骤或并列要点使用有序�
         node_title = str(payload.get("node_title") or "").strip()[:30] or None
         relation = str(payload.get("relation") or "").strip()[:30] or None
         new_dialog = bool(payload.get("new_dialog")) and request.allow_new_dialog
+        if request.mode == "grade":
+            add_node = new_dialog = False
         dialog_title = str(payload.get("dialog_title") or "").strip()[:30] or None
         if new_dialog:
             add_node = False

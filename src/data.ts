@@ -512,7 +512,7 @@ tmux attach -t dev  # 重新接入
 
 const linuxDemoAnalysis: CourseAnalysis = {
   title: 'Linux 命令与 Shell 基础',
-  summary: '演示学习路径根据《补充材料 1：Linux基础》已解析的 26 页内容整理，覆盖路径与文件操作、Shell、用户权限、文本处理、脚本及 SSH。',
+  summary: '学习路径根据《补充材料 1：Linux基础》已解析的 26 页内容整理，覆盖路径与文件操作、Shell、用户权限、文本处理、脚本及 SSH。',
   learning_path: [
     '路径符号与 pwd、ls、cd',
     '文件与目录操作：mkdir、touch、cp、mv',
@@ -558,14 +558,6 @@ export const defaultCourses: Course[] = [
   },
 ]
 
-export const knowledgeNodes = [
-  { id: 'filesystem', title: '路径与文件系统', eyebrow: '前置知识', mastery: 72, duration: '8 分钟', done: true },
-  { id: 'commands', title: '常用文件操作命令', eyebrow: '核心概念', mastery: 58, duration: '12 分钟', done: true },
-  { id: 'shell', title: 'Shell、终端与命令执行', eyebrow: '当前章节', mastery: 42, duration: '15 分钟', active: true },
-  { id: 'permissions', title: '用户、用户组与权限', eyebrow: '待学习', mastery: 20, duration: '18 分钟' },
-  { id: 'scripts', title: 'Shell 脚本与环境变量', eyebrow: '拓展', mastery: 0, duration: '10 分钟' },
-]
-
 const COURSES_KEY = 'course-replay-courses-linux-demo-v1'
 const MASTERY_KEY = 'course-replay-mastery-v1'
 
@@ -584,7 +576,9 @@ function migrateCourse(raw: LegacyCourse): Course {
   if (Array.isArray(raw.sections)) {
     // Already section-shaped. Keep the demo course's authored map fresh.
     if (raw.id === 'programming-linux' && raw.sections[0]?.id === 'linux-basics') {
-      raw.sections[0] = { ...raw.sections[0], knowledgeMap: linuxKnowledgeMap }
+      const stored = raw.sections[0].analysis
+      const analysis = stored?.summary.startsWith('演示学习路径') ? { ...stored, summary: linuxDemoAnalysis.summary } : stored
+      raw.sections[0] = { ...raw.sections[0], knowledgeMap: linuxKnowledgeMap, analysis }
     }
     return raw
   }
@@ -657,25 +651,5 @@ export function clearLocalCourses() {
     localStorage.removeItem(MASTERY_KEY)
   } catch {
     // ignore
-  }
-}
-
-export function loadMastery(sectionId: string, fallback = 0): number {
-  try {
-    const map = JSON.parse(localStorage.getItem(MASTERY_KEY) || '{}') as Record<string, number>
-    const value = Number(map[sectionId])
-    return Number.isFinite(value) && value > 0 ? value : fallback
-  } catch {
-    return fallback
-  }
-}
-
-export function saveMastery(sectionId: string, value: number) {
-  try {
-    const map = JSON.parse(localStorage.getItem(MASTERY_KEY) || '{}') as Record<string, number>
-    map[sectionId] = value
-    localStorage.setItem(MASTERY_KEY, JSON.stringify(map))
-  } catch {
-    // ignore storage failures (private mode, etc.)
   }
 }

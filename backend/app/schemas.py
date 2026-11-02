@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -165,6 +165,10 @@ class StudyAskRequest(BaseModel):
     existing_nodes: list[str] = Field(default_factory=list, max_length=50)
     current_dialog_title: str = Field(default="当前节点", max_length=100)
     allow_new_dialog: bool = True
+    # The lecture text of the knowledge point on screen, so answers match what the student is reading.
+    current_content: str = Field(default="", max_length=8000)
+    # "grade": the question is a self-test answer to check (no new topology node).
+    mode: Literal["ask", "grade"] = "ask"
 
 
 class StudyAskResponse(BaseModel):
@@ -248,6 +252,7 @@ class UserRead(BaseModel):
     username: str
     display_name: str
     created_at: datetime
+    preferences: dict[str, Any] = Field(default_factory=dict)
 
 
 class AuthResponse(BaseModel):
@@ -255,8 +260,20 @@ class AuthResponse(BaseModel):
     user: UserRead
 
 
+class SemesterPreference(BaseModel):
+    start: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    weeks: int = Field(ge=1, le=30)
+    name: str | None = Field(default=None, max_length=40)
+
+
+class UserPreferences(BaseModel):
+    # None = clear (back to the default semester).
+    semester: SemesterPreference | None = None
+
+
 class UserUpdate(BaseModel):
-    display_name: str = Field(min_length=1, max_length=32)
+    display_name: str | None = Field(default=None, min_length=1, max_length=32)
+    preferences: UserPreferences | None = None
 
 
 # ---------------------------------------------------------------------------

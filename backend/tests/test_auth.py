@@ -59,3 +59,20 @@ def test_requires_valid_token(client):
     assert client.get("/api/auth/me").status_code == 401
     assert client.get("/api/auth/me", headers=auth_header("forged")).status_code == 401
     assert client.get("/api/workspace").status_code == 401
+
+
+def test_semester_preference_follows_the_account(client):
+    token = register(client, "hq").json()["token"]
+    headers = auth_header(token)
+    assert client.get("/api/auth/me", headers=headers).json()["preferences"] == {}
+
+    semester = {"start": "2026-09-14", "weeks": 18, "name": "大一秋"}
+    updated = client.patch("/api/auth/me", json={"preferences": {"semester": semester}}, headers=headers).json()
+    assert updated["preferences"]["semester"] == semester and updated["display_name"] == "hq"
+
+    renamed = client.patch("/api/auth/me", json={"display_name": "HQ"}, headers=headers).json()
+    assert renamed["display_name"] == "HQ" and renamed["preferences"]["semester"]["weeks"] == 18
+
+    assert client.patch("/api/auth/me", json={"preferences": {"semester": {"start": "14/09", "weeks": 18}}}, headers=headers).status_code == 422
+    cleared = client.patch("/api/auth/me", json={"preferences": {"semester": None}}, headers=headers).json()
+    assert cleared["preferences"] == {}

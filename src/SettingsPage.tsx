@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useState } from 'react'
-import { AudioLines, Bot, Check, CheckCircle2, CircleAlert, Eye, EyeOff, Languages, LogIn, LogOut, Mic, PenLine, RefreshCw, Server } from 'lucide-react'
+import { AudioLines, Bot, CalendarDays, Check, CheckCircle2, CircleAlert, Eye, EyeOff, Languages, LogIn, LogOut, Mic, PenLine, RefreshCw, Server } from 'lucide-react'
 import { ApiError, filesApi } from './api'
 import { AccountView, syncLabel } from './account'
 import { initialsOf } from './session'
@@ -7,6 +7,8 @@ import { LanguageToggle, t, useLang } from './i18n'
 import { recordClip, startBrowserCapture } from './recorder'
 import { CHAT_PRESETS, CheckResult, ProviderPreset, STT_PRESETS, browserSpeechAvailable, chatHeaders, sttHeaders, updateSettings, useSettings } from './settings'
 import { PageHeader } from './ui'
+import { semesterName, semesterWeek, useSemester } from './semester'
+import { SemesterForm } from './SemesterForm'
 
 function StatusRow({ ok, label, detail, warn }: { ok: boolean; label: string; detail: ReactNode; warn?: boolean }) {
   return <div className={`check-row ${ok ? 'ok' : warn ? 'warn' : 'bad'}`}>
@@ -40,6 +42,7 @@ function ProviderFields({ presets, value, onChange }: {
 export function SettingsPage({ account, notify }: { account: AccountView; notify: (message: string) => void }) {
   useLang()
   const settings = useSettings()
+  const semester = useSemester()
   const [checking, setChecking] = useState(false)
   const [micTest, setMicTest] = useState<{ state: 'idle' | 'recording' | 'transcribing' | 'done' | 'error'; text?: string; level?: number }>({ state: 'idle' })
   const check = settings.lastCheck
@@ -114,13 +117,18 @@ export function SettingsPage({ account, notify }: { account: AccountView; notify
   const lastChecked = check ? new Date(check.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
 
   return <div className="page settings-page">
-    <PageHeader title={t('AI 与偏好设置')} subtitle={t('选择语言、对话 AI 和语音转文字服务。设置保存在这个浏览器里。')} />
+    <PageHeader title={t('AI 与偏好设置')} subtitle={t('语言、学期、对话 AI 和语音转文字。AI 设置和自己的 Key 只保存在这个浏览器里。')} />
     <section className="panel account-panel"><div className="avatar">{initialsOf(account.name)}</div><div className="account-info"><strong>{account.name}</strong><span>{account.mode === 'account' ? `@${account.username} · ${syncLabel(account)}` : syncLabel(account)}</span><p>{account.mode === 'account' ? t('课程、课堂提问、笔记和学习进度都保存在服务器数据库里，换设备登录即可继续。') : t('离线模式：数据只保存在这个浏览器里。登录后可以把这些数据导入账号。')}</p></div><div className="account-actions"><button className="button secondary" onClick={account.rename}><PenLine size={15} />{t('修改昵称')}</button>{account.mode === 'account' ? <button className="button danger" onClick={account.signOut}><LogOut size={15} />{t('退出登录')}</button> : <button className="button primary" onClick={account.showLogin}><LogIn size={15} />{t('登录 / 注册')}</button>}</div></section>
 
     <div className="settings-columns">
       <section className="panel settings-section">
         <div className="settings-head"><span className="settings-icon"><Languages size={20} /></span><div><h2>{t('语言')}</h2><p>{t('界面和 AI 回答使用的语言')}</p></div><LanguageToggle /></div>
         <label>{t('上课语言（语音识别）')}<select value={settings.lectureLanguage} onChange={(event) => updateSettings({ lectureLanguage: event.target.value as 'auto' | 'zh' | 'en' })}><option value="zh">{t('中文')}</option><option value="en">{t('英文')}</option><option value="auto">{t('自动识别')}</option></select></label>
+      </section>
+
+      <section className="panel settings-section">
+        <div className="settings-head"><span className="settings-icon"><CalendarDays size={20} /></span><div><h2>{t('学期')}</h2><p>{semesterName(semester)} · {semesterWeek(semester).label}{account.mode === 'account' ? ` · ${t('跟随账号同步')}` : ''}</p></div></div>
+        <SemesterForm key={`${semester.start}-${semester.weeks}-${semester.name || ''}`} />
       </section>
 
       <section className="panel settings-section check-panel">

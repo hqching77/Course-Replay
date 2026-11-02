@@ -30,7 +30,7 @@ function firstMondayOnOrAfter(year: number, month: number, day: number) {
 /**
  * Best guess when the user hasn't set one (Tsinghua-style calendar): fall term from the
  * first Monday on/after 14 Sep (2026 → 14 Sep, so 3 Nov is week 8), spring from the first
- * Monday on/after 20 Feb; 16 weeks. Editable in the sidebar.
+ * Monday on/after 20 Feb; 16 weeks. Users set their own in the sidebar or in 设置.
  */
 export function defaultSemester(now = new Date()): Semester {
   const month = now.getMonth()
@@ -39,28 +39,52 @@ export function defaultSemester(now = new Date()): Semester {
   return { start: iso(start), weeks: 16 }
 }
 
-function read(): Semester {
-  try {
-    const saved = JSON.parse(localStorage.getItem(KEY) || 'null') as Semester | null
-    if (saved && /^\d{4}-\d{2}-\d{2}$/.test(saved.start) && saved.weeks > 0) return saved
-  } catch {
-    // ignore unreadable settings
-  }
-  return defaultSemester()
+function valid(value: unknown): Semester | null {
+  const semester = value as Semester | null
+  return semester && typeof semester.start === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(semester.start) && semester.weeks > 0 ? semester : null
 }
 
-let current = read()
+function readLocal(): Semester | null {
+  try { return valid(JSON.parse(localStorage.getItem(KEY) || 'null')) } catch { return null }
+}
+
+/**
+ * Signed-in users keep their semester on the server (it follows them to other devices);
+ * guests keep it in this browser.
+ */
+let remote: ((semester: Semester | null) => Promise<unknown>) | null = null
+let custom = readLocal()
+let current = custom || defaultSemester()
 const listeners = new Set<() => void>()
 
+function apply(next: Semester | null) {
+  custom = next
+  current = next || defaultSemester()
+  listeners.forEach((listener) => listener())
+}
+
+export function connectSemesterSync(save: (semester: Semester | null) => Promise<unknown>, fromServer: unknown) {
+  remote = save
+  apply(valid(fromServer))
+}
+
+export function disconnectSemesterSync() {
+  remote = null
+  apply(readLocal())
+}
+
 export function saveSemester(next: Semester | null) {
+  apply(next)
+  if (remote) {
+    void remote(next).catch(() => undefined)
+    return
+  }
   try {
     if (next) localStorage.setItem(KEY, JSON.stringify(next))
     else localStorage.removeItem(KEY)
   } catch {
     // storage unavailable: keep it for this session only
   }
-  current = next || defaultSemester()
-  listeners.forEach((listener) => listener())
 }
 
 export function useSemester() {
@@ -68,7 +92,14 @@ export function useSemester() {
 }
 
 export function isCustomSemester() {
-  try { return Boolean(localStorage.getItem(KEY)) } catch { return false }
+  return Boolean(custom)
+}
+
+/** Week-1 Monday such that today falls in week `week`. */
+export function startForCurrentWeek(week: number, now = new Date()) {
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) - (Math.max(1, Math.round(week)) - 1) * 7)
+  return iso(monday)
 }
 
 export function semesterName(semester: Semester) {

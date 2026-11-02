@@ -14,7 +14,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _user_read(user: User) -> UserRead:
-    return UserRead(id=user.id, username=user.username, display_name=user.display_name, created_at=user.created_at)
+    return UserRead(id=user.id, username=user.username, display_name=user.display_name, created_at=user.created_at, preferences=user.preferences or {})
 
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
@@ -72,9 +72,15 @@ def me(user: User = Depends(get_current_user)) -> UserRead:
 
 @router.patch("/me", response_model=UserRead)
 def update_me(payload: UserUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> UserRead:
-    name = payload.display_name.strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="昵称不能为空")
-    user.display_name = name
+    if payload.display_name is not None:
+        name = payload.display_name.strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="昵称不能为空")
+        user.display_name = name
+    if payload.preferences is not None:
+        # Only the keys sent are changed; a key sent as null is removed.
+        sent = payload.preferences.model_dump(exclude_unset=True)
+        merged = {**(user.preferences or {}), **sent}
+        user.preferences = {key: value for key, value in merged.items() if value is not None}
     db.commit()
     return _user_read(user)
