@@ -46,6 +46,9 @@ import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import { Course, CourseAnalysis, KnowledgeNode, KnowledgeTier, Material, Section, TIER_META, courseMastery, createSection, deriveKnowledgeMap, knowledgeNodes, loadCourses, loadMastery, normalizeMarkdown, saveCourses, saveMastery } from './data'
 
+// Backend origin. Empty = same origin (Vite dev proxy). Set VITE_API_BASE at build time to point a hosted frontend at a deployed backend.
+const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
+
 /** Update a single section inside the courses array immutably. */
 function updateSection(setCourses: Dispatch<SetStateAction<Course[]>>, courseId: string, sectionId: string, updater: (section: Section) => Section) {
   setCourses((current) => current.map((course) => course.id === courseId ? {
@@ -416,7 +419,7 @@ function SectionDetail({ courses, setCourses, notify }: { courses: Course[]; set
     const poll = async () => {
       while (active) {
         try {
-          const response = await fetch(`/api/process/${jobId}`, { signal: controller.signal })
+          const response = await fetch(`${API_BASE}/api/process/${jobId}`, { signal: controller.signal })
           const job = await response.json().catch(() => ({}))
           if (!response.ok) throw new Error(job.detail || `读取任务状态失败（HTTP ${response.status}）`)
           if (!active) return
@@ -531,7 +534,7 @@ function SectionDetail({ courses, setCourses, notify }: { courses: Course[]; set
     const formData = new FormData()
     staged.forEach((material) => { const file = stagedFilesRef.current.get(material.id); if (file) formData.append('files', file) })
     try {
-      const response = await fetch('/api/process/start', { method: 'POST', body: formData, signal: controller.signal })
+      const response = await fetch(`${API_BASE}/api/process/start`, { method: 'POST', body: formData, signal: controller.signal })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.detail || `构建启动失败（HTTP ${response.status}）`)
       updateSection(setCourses, course.id, section.id, (current) => ({ ...current, processingJob: { jobId: payload.job_id, materialIds, progress: 8, stage: 'queued', message: '文件已上传，等待处理', filesTotal: staged.length, filesDone: 0, pagesDone: 0, startedAt: Date.now() } }))
@@ -553,7 +556,7 @@ function SectionDetail({ courses, setCourses, notify }: { courses: Course[]; set
   const cancelBuild = async () => {
     uploadControllerRef.current?.abort()
     const job = section.processingJob
-    if (job?.jobId) void fetch(`/api/process/${job.jobId}`, { method: 'DELETE' }).catch(() => undefined)
+    if (job?.jobId) void fetch(`${API_BASE}/api/process/${job.jobId}`, { method: 'DELETE' }).catch(() => undefined)
     const ids = new Set(job?.materialIds || [])
     updateSection(setCourses, course.id, section.id, (current) => ({
       ...current,
@@ -696,7 +699,7 @@ function Replay({ courses, setCourses, notify }: { courses: Course[]; setCourses
       chatHistory: [...(current.chatHistory || []), { id: userMessageId, role: 'user' as const, content: question }],
     }))
     try {
-      const response = await fetch('/api/study/ask', {
+      const response = await fetch(`${API_BASE}/api/study/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -825,7 +828,7 @@ function SettingsPage({ notify }: { notify: (message: string) => void }) {
   const checkServer = async (showNotice = true) => {
     setChecking(true)
     try {
-      const response = await fetch('/api/health')
+      const response = await fetch(`${API_BASE}/api/health`)
       if (!response.ok) throw new Error('API 服务不可用')
       const payload = await response.json()
       setHealth(payload)
