@@ -128,7 +128,7 @@ class VisualProcessResponse(BaseModel):
     documents: list[VisualDocumentInfo]
     analysis: CourseMaterialAnalysis
     model: str
-    provider: str = "CheapRouter"
+    provider: str = ""
     usage: dict[str, Any] | None = None
 
 

@@ -17,8 +17,12 @@ if settings.database_url.startswith("sqlite:///./"):
     relative_path = settings.database_url.removeprefix("sqlite:///./")
     Path(relative_path).parent.mkdir(parents=True, exist_ok=True)
 
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args)
+if settings.database_url.startswith("sqlite"):
+    engine = create_engine(settings.database_url, connect_args={"check_same_thread": False})
+else:
+    # Free hosted databases (e.g. Neon) suspend when idle and drop open connections:
+    # test each pooled connection before use and recycle old ones.
+    engine = create_engine(settings.database_url, pool_pre_ping=True, pool_recycle=300)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 

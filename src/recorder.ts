@@ -157,7 +157,7 @@ function micErrorMessage(error: unknown) {
 }
 
 export async function startServerCapture(handlers: { onChunk: (chunk: AudioChunk) => void; onLevel: (level: number) => void; onError: (message: string) => void }): Promise<Capture> {
-  if (!navigator.mediaDevices?.getUserMedia) throw new Error(t('当前浏览器不能录音（需要 HTTPS 或 localhost）'))
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error(t('当前浏览器不能录音，请换用最新版 Chrome、Edge 或 Safari'))
   let stream: MediaStream
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: true, autoGainControl: true } })
@@ -261,7 +261,7 @@ export function startBrowserCapture(language: 'zh' | 'en', handlers: { onFinal: 
 
 /** Record a short clip (for the 设置 microphone test) as 16 kHz WAV. */
 export async function recordClip(durationMs: number, onLevel?: (level: number) => void): Promise<Blob> {
-  if (!navigator.mediaDevices?.getUserMedia) throw new Error(t('当前浏览器不能录音（需要 HTTPS 或 localhost）'))
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error(t('当前浏览器不能录音，请换用最新版 Chrome、Edge 或 Safari'))
   let stream: MediaStream
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: true, autoGainControl: true } })

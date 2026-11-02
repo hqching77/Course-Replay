@@ -16,6 +16,9 @@ from app.main import app
 
 @pytest.fixture(autouse=True)
 def reset_database():
+    from app.ratelimit import reset_all
+
+    reset_all()
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     yield

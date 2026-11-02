@@ -21,6 +21,8 @@
 >
 > **语言与设置**：左下角或「AI 与偏好设置」可切换中文 / English（保存在浏览器）。设置页可以选对话 AI 和语音转文字服务（服务器默认或自己的 Key），「检查服务端配置」会真实调用一次 AI。语音转文字默认用硅基流动 SenseVoiceSmall，需在 `.env` 填 `STT_API_KEY`。界面翻译在 `src/i18n-en.ts`，`node scripts/check-i18n.mjs` 检查有没有漏翻。
 >
+> **上线给朋友 / 真实用户用**：看 [DEPLOY.md](DEPLOY.md)（Render + Neon 免费方案，或香港云服务器 + Docker）。数据库里的笔记、转写、提问用 `DATA_ENCRYPTION_KEY` 加密；所有密钥只放在服务器环境变量里，不进 git。
+>
 > 前端地址：http://127.0.0.1:8000；后端地址：http://127.0.0.1:8001。前端通过 `/api` 代理连接后端，保留现有浏览器课程存储，知识拓扑与分析结果不会因本次整合切换存储键。
 
 使用方式：把本文“Prompt 正文”完整交给 Codex、Claude Code、Cursor Agent 等可读写仓库的编码 Agent，并让它在 Course-Replay 仓库根目录执行。

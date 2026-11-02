@@ -1,6 +1,6 @@
 """Which AI / speech-to-text provider a request should use, and in which language to reply.
 
-By default everything uses the server's .env configuration. A user can pick
+By default everything uses the provider configured on the server. A user can pick
 their own OpenAI-compatible provider in 设置; the browser then sends it with
 each AI request in headers (the key stays in that browser, never in our DB):
 

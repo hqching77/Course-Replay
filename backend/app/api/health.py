@@ -1,3 +1,5 @@
+from urllib.parse import urlparse
+
 from fastapi import APIRouter
 
 from app.config import get_settings
@@ -15,7 +17,7 @@ def health_check() -> HealthResponse:
         version=settings.app_version,
         ai_configured=settings.ai_configured,
         configured=settings.ai_configured,
-        provider="CheapRouter",
+        provider=urlparse(settings.openai_base_url).hostname or "",
         base_url=settings.openai_base_url,
         model=settings.openai_chat_model or None,
         office_conversion=office_conversion_available(),

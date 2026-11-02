@@ -43,6 +43,9 @@ PPTX、DOCX 的完整视觉输入在 Windows 上可使用已安装的 Microsoft 
 - `AI_REQUIRES_LOGIN=true`（默认）时，`/api/process/start`、`/api/study/ask`、`/api/class/ask` 需要登录，避免匿名用户消耗 API Key。
 - `ALLOW_REGISTRATION=false` 可关闭公开注册。
 - 前端部署在别的域名（如 GitHub Pages）时，把该域名加入 `CORS_ORIGINS`，并在构建前端时设置 `VITE_API_BASE` 指向后端地址。
+- `postgres://` / `postgresql://` 开头的地址（Neon、Supabase 等直接给的）会自动改用 psycopg 驱动。
+- 加密：设置 `DATA_ENCRYPTION_KEY` 后，课程名、笔记、转写、提问、对话等内容用 AES-256-GCM 加密后才写入数据库（`app/crypto.py`）；旧的明文数据仍能读，下次保存时自动加密。`APP_ENV=production` 时没有密钥会拒绝启动。
+- 上线部署（Docker 镜像、Render、香港服务器）见根目录 [DEPLOY.md](../DEPLOY.md)。
 
 ## 语音转文字（上课中）
 

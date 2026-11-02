@@ -1,4 +1,15 @@
+# Secrets and local settings — never commit these.
 .env
+.env.*
+!.env.example
+deploy/*.env
+*.pem
+*.key
+# Local databases and uploaded files
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
 .venv/
 .uv-cache/
 backend/.uv-cache/

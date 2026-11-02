@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.crypto import EncryptedJSON, EncryptedText
 from app.database import Base
 
 
@@ -209,10 +210,10 @@ class StudyCourse(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     client_id: Mapped[str] = mapped_column(String(200))
     position: Mapped[int] = mapped_column(Integer, default=0)
-    title: Mapped[str] = mapped_column(Text, default="")
+    title: Mapped[str] = mapped_column(EncryptedText, default="")
     code: Mapped[str] = mapped_column(Text, default="")
-    description: Mapped[str] = mapped_column(Text, default="")
-    tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    description: Mapped[str] = mapped_column(EncryptedText, default="")
+    tags: Mapped[list[str]] = mapped_column(EncryptedJSON, default=list)
     mastery: Mapped[float] = mapped_column(Float, default=0.0)
     updated_label: Mapped[str] = mapped_column(Text, default="")
     accent: Mapped[str] = mapped_column(String(32), default="#c7f45d")
@@ -235,19 +236,19 @@ class StudySection(Base):
     course_id: Mapped[str] = mapped_column(ForeignKey("study_courses.id", ondelete="CASCADE"), index=True)
     client_id: Mapped[str] = mapped_column(String(200))
     position: Mapped[int] = mapped_column(Integer, default=0)
-    title: Mapped[str] = mapped_column(Text, default="")
+    title: Mapped[str] = mapped_column(EncryptedText, default="")
     status: Mapped[str] = mapped_column(String(32), default="empty")
     created_ms: Mapped[int] = mapped_column(BigInteger, default=0)
     mastery: Mapped[float | None] = mapped_column(Float, nullable=True)
     # AI build output and in-progress job state, stored as the browser sends them.
-    analysis: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    analysis: Mapped[dict | None] = mapped_column(EncryptedJSON, nullable=True)
     analysis_job_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    knowledge_map: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    processing_job: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    knowledge_map: Mapped[list | None] = mapped_column(EncryptedJSON, nullable=True)
+    processing_job: Mapped[dict | None] = mapped_column(EncryptedJSON, nullable=True)
     # 上课中 (live class) session.
     live_started_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     live_ended_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    live_topic: Mapped[str | None] = mapped_column(Text, nullable=True)
+    live_topic: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
     # Title was generated (e.g. "第 3 讲 · 11月2日"); replaced by the AI title after the first build.
     auto_title: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
@@ -279,12 +280,12 @@ class StudyMaterial(Base):
     section_id: Mapped[str] = mapped_column(ForeignKey("study_sections.id", ondelete="CASCADE"), index=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
     client_id: Mapped[str] = mapped_column(String(200))
-    name: Mapped[str] = mapped_column(Text, default="")
-    meta: Mapped[str] = mapped_column(Text, default="")
+    name: Mapped[str] = mapped_column(EncryptedText, default="")
+    meta: Mapped[str] = mapped_column(EncryptedText, default="")
     file_type: Mapped[str] = mapped_column(String(32), default="")
     status: Mapped[str] = mapped_column(String(32), default="pending")
     progress: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
     preview_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     pages: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Server-side copy (uploaded_files.id), so the file survives a page reload until it is built.
@@ -301,7 +302,7 @@ class StudyMessage(Base):
     position: Mapped[int] = mapped_column(Integer, default=0)
     client_id: Mapped[str] = mapped_column(String(200))
     role: Mapped[str] = mapped_column(String(16))
-    content: Mapped[str] = mapped_column(Text, default="")
+    content: Mapped[str] = mapped_column(EncryptedText, default="")
     node_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
@@ -314,9 +315,9 @@ class StudyBranch(Base):
     section_id: Mapped[str] = mapped_column(ForeignKey("study_sections.id", ondelete="CASCADE"), index=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
     client_id: Mapped[str] = mapped_column(String(200))
-    title: Mapped[str] = mapped_column(Text, default="")
+    title: Mapped[str] = mapped_column(EncryptedText, default="")
     parent_id: Mapped[str] = mapped_column(String(200), default="")
-    question: Mapped[str] = mapped_column(Text, default="")
+    question: Mapped[str] = mapped_column(EncryptedText, default="")
 
 
 class ClassQuestion(Base):
@@ -328,9 +329,9 @@ class ClassQuestion(Base):
     section_id: Mapped[str] = mapped_column(ForeignKey("study_sections.id", ondelete="CASCADE"), index=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
     client_id: Mapped[str] = mapped_column(String(200))
-    question: Mapped[str] = mapped_column(Text, default="")
-    answer: Mapped[str] = mapped_column(Text, default="")
-    topic: Mapped[str | None] = mapped_column(Text, nullable=True)
+    question: Mapped[str] = mapped_column(EncryptedText, default="")
+    answer: Mapped[str] = mapped_column(EncryptedText, default="")
+    topic: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="answered")
     asked_ms: Mapped[int] = mapped_column(BigInteger, default=0)
     answered_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -345,7 +346,7 @@ class TranscriptSegment(Base):
     section_id: Mapped[str] = mapped_column(ForeignKey("study_sections.id", ondelete="CASCADE"), index=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
     client_id: Mapped[str] = mapped_column(String(200))
-    text: Mapped[str] = mapped_column(Text, default="")
+    text: Mapped[str] = mapped_column(EncryptedText, default="")
     started_ms: Mapped[int] = mapped_column(BigInteger, default=0)
     ended_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
@@ -357,7 +358,7 @@ class UploadedFile(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=True)
-    filename: Mapped[str] = mapped_column(Text)
+    filename: Mapped[str] = mapped_column(EncryptedText)
     stored_path: Mapped[str] = mapped_column(Text)
     size: Mapped[int] = mapped_column(BigInteger, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

@@ -39,7 +39,7 @@ def test_ai_check_uses_server_provider(client, chat_calls, headers):
 
 def test_ai_check_reports_upstream_failure(client, chat_calls, headers, monkeypatch):
     async def broken(self, messages, **kwargs):
-        raise RuntimeError("CheapRouter 返回 HTTP 401：invalid key")
+        raise RuntimeError("AI 服务返回 HTTP 401：invalid key")
 
     monkeypatch.setattr(AIProvider, "chat", broken)
     body = client.post("/api/ai/check", headers=headers).json()

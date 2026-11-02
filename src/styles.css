@@ -94,7 +94,7 @@ a { color: inherit; text-decoration: none; }
 .button.compact { padding: 7px 10px; font-size: 9px; }
 .button.danger { background: #3a211d; border-color: #6f3b32; color: #ff9b82; }
 .file-row { grid-template-columns: 35px minmax(0, 1fr) auto auto 30px; position: relative; }
-.file-preview-link { color: var(--lime); border: 1px solid #3f4b35; border-radius: 5px; padding: 5px 7px; font-size: 8px; white-space: nowrap; }
+.file-preview-link { background: transparent; color: var(--lime); border: 1px solid #3f4b35; border-radius: 5px; padding: 5px 7px; font-size: 8px; white-space: nowrap; }
 .material-menu-wrap { position: relative; }
 .material-menu { position: absolute; z-index: 20; top: 33px; right: 0; min-width: 145px; padding: 6px; border: 1px solid #353e49; border-radius: 8px; background: #181e25; box-shadow: 0 12px 35px #0009; }
 .material-menu a, .material-menu button { width: 100%; min-height: 32px; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 5px; padding: 7px 9px; background: transparent; color: #b7c0ca; font-size: 9px; text-align: left; white-space: nowrap; }

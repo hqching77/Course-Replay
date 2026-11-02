@@ -32,7 +32,7 @@ export const STT_PRESETS: ProviderPreset[] = [
 ]
 
 export interface ProviderChoice {
-  /** server = use the backend's .env provider; custom = the user's own OpenAI-compatible provider. */
+  /** server = the provider configured on the server; custom = the user's own OpenAI-compatible provider. */
   mode: 'server' | 'custom'
   preset: string
   baseUrl: string

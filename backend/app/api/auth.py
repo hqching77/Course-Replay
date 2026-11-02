@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.models import User
+from app.ratelimit import client_address, failed_logins_by_ip, failed_logins_by_user, registrations_by_ip, too_many
 from app.schemas import AuthResponse, LoginRequest, RegisterRequest, UserRead, UserUpdate
 from app.security import create_session, get_current_user, hash_password, revoke_session, verify_password
 
@@ -17,9 +18,13 @@ def _user_read(user: User) -> UserRead:
 
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthResponse:
+def register(payload: RegisterRequest, request: Request, db: Session = Depends(get_db)) -> AuthResponse:
     if not get_settings().allow_registration:
         raise HTTPException(status_code=403, detail="当前服务器未开放注册")
+    address = client_address(request)
+    if registrations_by_ip.blocked(address):
+        raise too_many("注册太频繁，请稍后再试")
+    registrations_by_ip.add(address)
     username = payload.username.strip().lower()
     if db.scalar(select(User).where(User.username == username)):
         raise HTTPException(status_code=409, detail="用户名已被使用")
@@ -40,9 +45,15 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthRes
 
 
 @router.post("/login", response_model=AuthResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
-    user = db.scalar(select(User).where(User.username == payload.username.strip().lower()))
+def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> AuthResponse:
+    username = payload.username.strip().lower()
+    address = client_address(request)
+    if failed_logins_by_user.blocked(username) or failed_logins_by_ip.blocked(address):
+        raise too_many()
+    user = db.scalar(select(User).where(User.username == username))
     if user is None or not verify_password(payload.password, user.password_hash):
+        failed_logins_by_user.add(username)
+        failed_logins_by_ip.add(address)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     token = create_session(db, user)
     db.commit()

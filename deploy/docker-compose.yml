@@ -1,0 +1,30 @@
+# Course Replay API on your own server (e.g. an Aliyun Hong Kong ECS). See DEPLOY.md.
+#   cd deploy && cp production.env.example production.env   # fill it in
+#   edit Caddyfile (your domain), then:  docker compose up -d --build
+services:
+  api:
+    build: ../backend
+    env_file: production.env
+    volumes:
+      - api-data:/app/data          # SQLite file (if used) and uploaded documents
+    restart: unless-stopped
+    # Not published to the internet: only Caddy talks to it.
+
+  caddy:
+    image: caddy:2
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data            # HTTPS certificates
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  api-data:
+  caddy-data:
+  caddy-config:

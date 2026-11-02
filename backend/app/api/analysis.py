@@ -36,6 +36,7 @@ from app.services.visual_processor import (
     VisualProcessingError,
     prepare_visual_document,
 )
+from app.crypto import decrypt_text, encrypt_text
 from app.providers import effective_settings, language_rule, reply_language, stt_config, transcribe_audio
 from app.security import get_optional_user, require_ai_access, require_stt_access
 
@@ -62,6 +63,8 @@ class VisualJob:
     current_file: str | None = None
     pages_total: int = 0
     pages_done: int = 0
+    # Who started the build; only they can read its status, result and files.
+    owner_id: str | None = None
 
 
 jobs: dict[str, VisualJob] = {}
@@ -95,7 +98,8 @@ def _load_completed_job(job_id: str) -> VisualJob | None:
     if not result_path.exists():
         return None
     try:
-        result = VisualProcessResponse.model_validate_json(result_path.read_text(encoding="utf-8"))
+        result = VisualProcessResponse.model_validate_json(decrypt_text(result_path.read_text(encoding="utf-8")))
+        owner_id = json.loads((work_dir / "owner.json").read_text(encoding="utf-8")).get("owner_id")
     except (OSError, ValueError):
         return None
 
@@ -116,6 +120,7 @@ def _load_completed_job(job_id: str) -> VisualJob | None:
         result=result,
         work_dir=work_dir,
         preview_paths=preview_paths,
+        owner_id=owner_id,
     )
     jobs[normalized_id] = job
     return job
@@ -201,7 +206,7 @@ async def _run_visual_job(
         )
         if job.work_dir:
             (job.work_dir / "result.json").write_text(
-                json.dumps(job.result.model_dump(mode="json"), ensure_ascii=False, indent=2),
+                encrypt_text(json.dumps(job.result.model_dump(mode="json"), ensure_ascii=False)),
                 encoding="utf-8",
             )
         job.status = "completed"
@@ -268,7 +273,7 @@ async def start_visual_processing(
     settings = get_settings()
     ai_settings = effective_settings(request)
     if not ai_settings.ai_configured:
-        raise HTTPException(status_code=503, detail="请在根目录 .env 配置 OPENAI_API_KEY 和 OPENAI_CHAT_MODEL")
+        raise HTTPException(status_code=503, detail="服务器还没有配置 AI 服务")
     files = files or []
     uploaded = _owned_uploads(db, _parse_upload_ids(upload_ids), user)
     transcript_text = (transcript or "").strip()[-MAX_TRANSCRIPT_CHARS:]
@@ -309,7 +314,9 @@ async def start_visual_processing(
         for upload in files:
             await upload.close()
 
-    job = VisualJob(job_id=job_id, filenames=[safe_name for _, safe_name in stored_files], work_dir=work_dir)
+    owner_id = user.id if user else None
+    (work_dir / "owner.json").write_text(json.dumps({"owner_id": owner_id}), encoding="utf-8")
+    job = VisualJob(job_id=job_id, filenames=[safe_name for _, safe_name in stored_files], work_dir=work_dir, owner_id=owner_id)
     jobs[job_id] = job
     tasks[job_id] = asyncio.create_task(_run_visual_job(
         job,
@@ -353,7 +360,8 @@ async def upload_course_file(
     upload_id = str(uuid.uuid4())
     folder = settings.artifacts_dir / "uploads" / upload_id
     folder.mkdir(parents=True, exist_ok=True)
-    destination = folder / safe_name
+    # The original name lives (encrypted) in the database, not in the path.
+    destination = folder / f"original{Path(safe_name).suffix.lower()}"
     size = 0
     max_bytes = settings.max_upload_mb * 1024 * 1024
     try:
@@ -375,8 +383,19 @@ async def upload_course_file(
     return FileUploadRead(id=upload_id, filename=safe_name, size=size)
 
 
+def _owner_matches(job: VisualJob, user: User | None) -> bool:
+    return job.owner_id == (user.id if user else None)
+
+
+def _owned_job(job_id: str, user: User | None) -> VisualJob:
+    job = _get_job(job_id)
+    if not job or not _owner_matches(job, user):
+        raise HTTPException(status_code=404, detail="处理任务不存在或服务已重启")
+    return job
+
+
 @router.get("/process")
-def list_visual_jobs() -> list[dict[str, object]]:
+def list_visual_jobs(user: User | None = Depends(get_optional_user)) -> list[dict[str, object]]:
     return [
         {
             "job_id": job.job_id,
@@ -387,6 +406,7 @@ def list_visual_jobs() -> list[dict[str, object]]:
             "filenames": job.filenames,
         }
         for job in sorted(jobs.values(), key=lambda item: item.created_at, reverse=True)
+        if _owner_matches(job, user)
     ]
 
 
@@ -548,7 +568,7 @@ async def transcribe(
     settings = get_settings()
     config = stt_config(request)
     if not config.configured:
-        raise HTTPException(status_code=503, detail="语音识别尚未配置：请在 .env 设置 STT_API_KEY，或在设置里填写自己的语音识别接口")
+        raise HTTPException(status_code=503, detail="服务器还没有配置语音识别，可以在设置里填写自己的语音识别接口")
     max_bytes = settings.max_audio_mb * 1024 * 1024
     audio = await file.read(max_bytes + 1)
     await file.close()
@@ -570,18 +590,13 @@ async def transcribe(
     return TranscribeResponse(text=text, model=config.model, source=config.source, latency_ms=latency)
 
 @router.get("/process/{job_id}", response_model=VisualJobStatus)
-def get_visual_job(job_id: str) -> VisualJobStatus:
-    job = _get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="处理任务不存在或服务已重启")
-    return _status(job)
+def get_visual_job(job_id: str, user: User | None = Depends(get_optional_user)) -> VisualJobStatus:
+    return _status(_owned_job(job_id, user))
 
 
 @router.delete("/process/{job_id}", response_model=VisualJobStatus)
-async def cancel_visual_job(job_id: str) -> VisualJobStatus:
-    job = _get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="处理任务不存在")
+async def cancel_visual_job(job_id: str, user: User | None = Depends(get_optional_user)) -> VisualJobStatus:
+    job = _owned_job(job_id, user)
     task = tasks.get(job_id)
     if task and not task.done():
         task.cancel()
@@ -597,9 +612,9 @@ async def cancel_visual_job(job_id: str) -> VisualJobStatus:
 
 
 @router.get("/process/{job_id}/files/{file_index}")
-def preview_visual_file(job_id: str, file_index: int) -> FileResponse:
-    job = _get_job(job_id)
-    path = job.preview_paths.get(file_index) if job and job.preview_paths else None
+def preview_visual_file(job_id: str, file_index: int, user: User | None = Depends(get_optional_user)) -> FileResponse:
+    job = _owned_job(job_id, user)
+    path = job.preview_paths.get(file_index) if job.preview_paths else None
     if not path or not path.exists():
         raise HTTPException(status_code=404, detail="预览文件不存在")
     media_type = "application/pdf" if path.suffix.lower() == ".pdf" else None

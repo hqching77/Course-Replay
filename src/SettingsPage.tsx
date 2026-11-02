@@ -67,7 +67,7 @@ export function SettingsPage({ account, notify }: { account: AccountView; notify
         const configured = Boolean(Object.keys(sttHeaders(settings)).length)
         result.stt = { ok: configured, source: 'custom', model: settings.stt.model, error: configured ? undefined : t('请先填写自己的 API Key') }
       } else {
-        result.stt = { ok: health.stt_configured, source: 'server', model: health.stt_model, error: health.stt_configured ? undefined : t('服务器未配置 STT_API_KEY') }
+        result.stt = { ok: health.stt_configured, source: 'server', model: health.stt_model, error: health.stt_configured ? undefined : t('服务器还没有配置语音识别') }
       }
     } catch (error) {
       result.backend = { ok: false, error: error instanceof Error ? error.message : String(error) }
@@ -135,7 +135,7 @@ export function SettingsPage({ account, notify }: { account: AccountView; notify
       <section className="panel settings-section">
         <div className="settings-head"><span className="settings-icon"><Bot size={20} /></span><div><h2>{t('对话 AI')}</h2><p>{t('上课提问、AI 讲师和生成课堂笔记都用它')}</p></div></div>
         <div className="mode-options">
-          <label className={chat.mode === 'server' ? 'active' : ''}><input type="radio" checked={chat.mode === 'server'} onChange={() => updateSettings((current) => ({ ...current, chat: { ...current.chat, mode: 'server' } }))} /><span><strong>{t('服务器默认')}</strong><small>{t('用服务器 .env 里配置的模型，不需要自己的 Key')}</small></span></label>
+          <label className={chat.mode === 'server' ? 'active' : ''}><input type="radio" checked={chat.mode === 'server'} onChange={() => updateSettings((current) => ({ ...current, chat: { ...current.chat, mode: 'server' } }))} /><span><strong>{t('服务器默认')}</strong><small>{t('用服务器配置好的模型，不需要自己的 Key')}</small></span></label>
           <label className={chat.mode === 'custom' ? 'active' : ''}><input type="radio" checked={chat.mode === 'custom'} onChange={() => updateSettings((current) => ({ ...current, chat: { ...current.chat, mode: 'custom' } }))} /><span><strong>{t('自己的接口')}</strong><small>{t('任何 OpenAI 兼容接口；生成笔记需要模型支持图片输入')}</small></span></label>
         </div>
         {chat.mode === 'custom' && <ProviderFields presets={CHAT_PRESETS} value={chat} onChange={(changes) => updateSettings((current) => ({ ...current, chat: { ...current.chat, ...changes } }))} />}

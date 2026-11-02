@@ -1,0 +1,13 @@
+# HTTPS front door for the API. Replace api.example.com with your API's domain
+# (its DNS A record must point at this server). Caddy gets the certificate itself.
+# No domain? <server-ip-with-dashes>.sslip.io works too, e.g. 47-242-1-2.sslip.io
+api.example.com {
+	encode gzip
+	request_body {
+		max_size 120MB
+	}
+	reverse_proxy api:8000 {
+		# The API's sign-in rate limits read the visitor address from this header.
+		header_up X-Real-IP {remote_host}
+	}
+}

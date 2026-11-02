@@ -43,7 +43,7 @@ import {
 } from 'lucide-react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Course, CourseAnalysis, KnowledgeNode, KnowledgeTier, Section, TIER_META, courseMastery, createSection, deriveKnowledgeMap, knowledgeNodes, loadMastery, normalizeMarkdown, saveMastery } from './data'
-import { apiFetch, apiUrl } from './api'
+import { apiFetch, openProtectedFile } from './api'
 import { AccountView, syncLabel } from './account'
 import { AuthScreen, SplashScreen } from './AuthScreen'
 import { addMaterialFiles, autoSectionTitle, buildInputs, forgetStagedFile, startSectionBuild, titleFromAnalysis } from './build'
@@ -307,7 +307,8 @@ function CreateCourseModal({ onClose, onCreate }: { onClose: () => void; onCreat
   const submit = (event: FormEvent) => {
     event.preventDefault()
     if (!title.trim()) return
-    const id = `${title.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`
+    // Random id: ids are stored unencrypted, so they must not contain the course name.
+    const id = `course-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     onCreate({ id, title: title.trim(), description: description.trim() || t('一门新的课程，等待新建小节。'), code: t('NEW · 2026 秋'), tags: [t('新课程')], mastery: 0, updated: t('刚刚'), accent: '#c7f45d', sections: [] })
   }
   return <div className="modal-backdrop" onMouseDown={onClose}><form className="modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">NEW COURSE</span><h2>{t('创建一门课程')}</h2></div><button type="button" className="icon-button" aria-label={t('关闭')} onClick={onClose}><X size={18} /></button></div><label>{t('课程名称')}<input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('例如：数字信号处理')} /></label><label>{t('课程简介')}<textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('这门课主要学习什么？')} /></label><div className="modal-actions"><button type="button" className="button ghost" onClick={onClose}>{t('取消')}</button><button className="button primary" disabled={!title.trim()}>{t('创建课程')} <ArrowRight size={16} /></button></div></form></div>
@@ -525,6 +526,10 @@ function SectionDetail({ courses, setCourses, notify }: PageProps) {
     void addMaterialFiles(setCourses, course.id, section.id, selected)
   }
 
+  const openDocument = (previewUrl: string) => {
+    openProtectedFile(previewUrl).catch((error) => notify(error instanceof Error ? error.message : t('打不开这个文档')))
+  }
+
   const removeMaterial = (materialId: string) => {
     forgetStagedFile(materialId)
     updateSection(setCourses, course.id, section.id, (current) => ({ ...current, materials: current.materials.filter((material) => material.id !== materialId) }))
@@ -614,12 +619,12 @@ function SectionDetail({ courses, setCourses, notify }: PageProps) {
           {section.materials.map((material) => <div className="file-row" key={material.id}>
             <span className={`file-type ${material.type.toLowerCase()}`}><FileText size={18} /></span>
             <div className="file-info"><strong>{material.name}</strong><span title={material.error}>{material.error || material.meta}</span></div>
-            {material.previewUrl && <a className="file-preview-link" href={apiUrl(material.previewUrl)} target="_blank" rel="noreferrer">{t('查看文档')}</a>}
+            {material.previewUrl && <button className="file-preview-link" onClick={() => openDocument(material.previewUrl!)}>{t('查看文档')}</button>}
             <div className={`status ${material.status}`}>{material.status === 'ready' ? <><CheckCircle2 size={15} />{t('已就绪')}</> : material.status === 'failed' ? <><X size={14} />{t('失败')}</> : material.status === 'cancelled' ? <><X size={14} />{t('已取消')}</> : material.status === 'pending' ? <><Clock3 size={14} />{t('待构建')}</> : material.status === 'uploading' ? <><RefreshCw className="spin-icon" size={14} />{t('上传中')}</> : <><RefreshCw size={14} />{t('构建中')}{material.progress ? ` · ${material.progress}%` : ''}</>}</div>
             <div className="material-menu-wrap">
               <button className="icon-button tiny" aria-label={t('{name} 操作', { name: material.name })} aria-expanded={openMaterialMenu === material.id} onClick={() => setOpenMaterialMenu((current) => current === material.id ? null : material.id)}><MoreHorizontal size={17} /></button>
               {openMaterialMenu === material.id && <div className="material-menu">
-                {material.previewUrl && <a href={apiUrl(material.previewUrl)} target="_blank" rel="noreferrer"><FileText size={14} />{t('查看文档')}</a>}
+                {material.previewUrl && <button onClick={() => { setOpenMaterialMenu(null); openDocument(material.previewUrl!) }}><FileText size={14} />{t('查看文档')}</button>}
                 <button className="delete" onClick={() => removeMaterial(material.id)} disabled={building && material.status === 'processing'}><Trash2 size={14} />{t('移除文件')}</button>
               </div>}
             </div>

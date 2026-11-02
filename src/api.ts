@@ -64,7 +64,7 @@ export async function apiFetch<T = unknown>(path: string, options: ApiOptions = 
     response = await fetch(apiUrl(path), { method: options.method || (body ? 'POST' : 'GET'), headers, body, signal: options.signal, keepalive: options.keepalive })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
-    throw new ApiError(getLang() === 'en' ? 'Cannot reach the server — is the backend running?' : '无法连接服务器，请确认后端已启动', 0) // i18n-ok: bilingual
+    throw new ApiError(getLang() === 'en' ? "Can't reach the server — check your connection and try again" : '无法连接服务器，请检查网络后重试', 0) // i18n-ok: bilingual
   }
   if (response.status === 204) return undefined as T
   const payload = await response.json().catch(() => ({}))
@@ -82,6 +82,35 @@ function describeValidation(items: { loc?: unknown[]; msg?: string }[]) {
     ? { username: 'Username must be 2–32 letters, digits, Chinese characters or _ . @ -', password: 'Password must be at least 6 characters', display_name: 'Display name cannot be empty' }
     : { username: '用户名需为 2-32 位字母、数字、中文或 _ . @ -', password: '密码至少 6 位', display_name: '昵称不能为空' } // i18n-ok: bilingual
   return names[field] || items[0]?.msg || (en ? 'Invalid input' : '输入有误') // i18n-ok: bilingual
+}
+
+/**
+ * Open a file served by the backend (e.g. a document preview) in a new tab.
+ * Previews are private to their owner, so the request carries the sign-in token
+ * and the tab shows a local copy.
+ */
+export async function openProtectedFile(path: string) {
+  const tab = window.open('', '_blank') // open now, inside the click, so pop-up blockers allow it
+  try {
+    const headers: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}` } : {}
+    const response = await fetch(apiUrl(path), { headers })
+    if (!response.ok) throw new ApiError(getLang() === 'en' ? "Couldn't open the document" : '打不开这个文档', response.status) // i18n-ok
+    let blob = await response.blob()
+    // Show notes (.md / .txt) as readable text instead of downloading them.
+    if (blob.type.startsWith('text/')) blob = new Blob([blob], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    if (tab) tab.location.href = url
+    else {
+      const link = document.createElement('a') // pop-up blocked: download it instead of leaving the app
+      link.href = url
+      link.download = ''
+      link.click()
+    }
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  } catch (error) {
+    tab?.close()
+    throw error
+  }
 }
 
 export async function serverReachable() {

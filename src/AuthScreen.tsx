@@ -68,7 +68,7 @@ export function AuthScreen({ notice, onSignedIn, onGuest, onRetry }: {
         <h1>{mode === 'login' ? t('欢迎回来') : t('创建你的账号')}</h1>
         <p className="auth-lead">{t('登录后，课程、课堂提问、笔记和学习进度都保存在服务器上，换设备也能接着学。')}</p>
         {notice && <div className="auth-notice">{notice}</div>}
-        {serverOk === false && <div className="api-error"><CloudOff size={18} /><div><strong>{t('连不上服务器')}</strong><p>{t('请确认后端已启动（npm run dev:api），或先用离线模式。')}</p></div><button type="button" className="icon-button tiny" aria-label={t('重试')} onClick={onRetry}><RefreshCw size={15} /></button></div>}
+        {serverOk === false && <div className="api-error"><CloudOff size={18} /><div><strong>{t('连不上服务器')}</strong><p>{t('服务器可能在维护或网络不通，可以稍后重试，或先用离线模式。')}</p></div><button type="button" className="icon-button tiny" aria-label={t('重试')} onClick={onRetry}><RefreshCw size={15} /></button></div>}
         <div className="auth-tabs" role="tablist">
           <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'active' : ''} onClick={() => switchMode('login')}>{t('登录')}</button>
           <button type="button" role="tab" aria-selected={mode === 'register'} className={mode === 'register' ? 'active' : ''} onClick={() => switchMode('register')}>{t('注册')}</button>

@@ -36,9 +36,9 @@ class AIProvider:
             raise RuntimeError("中转站响应超时，已自动重试 2 次；请稍后重新上传。") from exc
         if isinstance(exc, APIConnectionError):
             cause = str(exc.__cause__ or "连接在响应完成前被关闭")
-            raise RuntimeError(f"无法稳定连接 CheapRouter，已自动重试 2 次：{cause}") from exc
+            raise RuntimeError(f"无法稳定连接 AI 服务，已自动重试 2 次：{cause}") from exc
         if isinstance(exc, APIStatusError):
-            raise RuntimeError(f"CheapRouter 返回 HTTP {exc.status_code}：{exc.message}") from exc
+            raise RuntimeError(f"AI 服务返回 HTTP {exc.status_code}：{exc.message}") from exc
         raise exc
 
     async def chat(

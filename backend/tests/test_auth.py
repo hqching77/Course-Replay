@@ -1,7 +1,8 @@
-def register(client, username="hq", password="secret123", display_name=""):
+def register(client, username="hq", password="secret123", display_name="", headers=None):
     return client.post(
         "/api/auth/register",
         json={"username": username, "password": password, "display_name": display_name},
+        headers=headers,
     )
 
 
