@@ -17,6 +17,7 @@ from app.models import (
     StudyMaterial,
     StudyMessage,
     StudySection,
+    TranscriptSegment,
     User,
 )
 from app.schemas import (
@@ -29,6 +30,7 @@ from app.schemas import (
     WorkspaceRead,
     WorkspaceSection,
     WorkspaceSectionPut,
+    WorkspaceTranscriptSegment,
 )
 from app.security import get_current_user
 
@@ -58,6 +60,7 @@ def _section_out(section: StudySection) -> WorkspaceSection:
                 error=item.error,
                 preview_url=item.preview_url,
                 pages=item.pages,
+                upload_id=item.upload_id,
             )
             for item in section.materials
         ],
@@ -89,6 +92,11 @@ def _section_out(section: StudySection) -> WorkspaceSection:
         live_started_at=section.live_started_ms,
         live_ended_at=section.live_ended_ms,
         live_topic=section.live_topic,
+        auto_title=section.auto_title,
+        transcript=[
+            WorkspaceTranscriptSegment(id=item.client_id, text=item.text, started_at=item.started_ms, ended_at=item.ended_ms)
+            for item in section.transcript
+        ],
     )
 
 
@@ -103,6 +111,7 @@ def read_workspace(user: User = Depends(get_current_user), db: Session = Depends
             selectinload(StudyCourse.sections).selectinload(StudySection.messages),
             selectinload(StudyCourse.sections).selectinload(StudySection.branches),
             selectinload(StudyCourse.sections).selectinload(StudySection.class_questions),
+            selectinload(StudyCourse.sections).selectinload(StudySection.transcript),
         )
     ).all()
     return WorkspaceRead(
@@ -191,6 +200,7 @@ def put_section(
     section.live_started_ms = data.live_started_at
     section.live_ended_ms = data.live_ended_at
     section.live_topic = data.live_topic
+    section.auto_title = data.auto_title
     # Child lists are small and always sent whole, so replace them wholesale.
     section.materials = [
         StudyMaterial(
@@ -204,6 +214,7 @@ def put_section(
             error=item.error,
             preview_url=item.preview_url,
             pages=item.pages,
+            upload_id=item.upload_id,
         )
         for index, item in enumerate(data.materials)
     ]
@@ -229,5 +240,9 @@ def put_section(
             answered_ms=item.answered_at,
         )
         for index, item in enumerate(data.class_questions or [])
+    ]
+    section.transcript = [
+        TranscriptSegment(position=index, client_id=item.id, text=item.text, started_ms=item.started_at, ended_ms=item.ended_at)
+        for index, item in enumerate(data.transcript or [])
     ]
     db.commit()

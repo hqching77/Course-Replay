@@ -1,4 +1,6 @@
-export type MaterialStatus = 'pending' | 'ready' | 'processing' | 'failed' | 'cancelled'
+import { t } from './i18n'
+
+export type MaterialStatus = 'uploading' | 'pending' | 'ready' | 'processing' | 'failed' | 'cancelled'
 
 export interface CourseAnalysis {
   title: string
@@ -83,13 +85,13 @@ export function deriveKnowledgeMap(analysis: CourseAnalysis): KnowledgeNode[] {
     const tier: KnowledgeTier = index < prereqEnd ? 'prereq' : index >= advancedStart ? 'advanced' : 'core'
     const concepts = buckets[index]
     const question = analysis.review_questions?.[index]
-    const summary = detail || concepts.slice(0, 2).join('、') || `第 ${index + 1} 个学习阶段`
+    const summary = detail || concepts.slice(0, 2).join(t('、')) || t('第 {n} 个学习阶段', { n: index + 1 })
     const parts: string[] = [`## ${title}`]
     if (index === 0 && analysis.summary) parts.push(normalizeMarkdown(analysis.summary))
-    parts.push(`**本步聚焦**：${normalizeMarkdown(detail || title)}`)
-    if (concepts.length) parts.push(`### 相关概念\n\n${concepts.map((concept) => `- ${normalizeMarkdown(concept)}`).join('\n')}`)
-    if (question) parts.push(`### 自测\n\n> ${normalizeMarkdown(question)}`)
-    parts.push(`> 本节内容由「${analysis.title}」的 AI 分析整理，可在右侧向 AI 讲师追问以展开更多细节。`)
+    parts.push(`**${t('本步聚焦')}**${t('：')}${normalizeMarkdown(detail || title)}`)
+    if (concepts.length) parts.push(`### ${t('相关概念')}\n\n${concepts.map((concept) => `- ${normalizeMarkdown(concept)}`).join('\n')}`)
+    if (question) parts.push(`### ${t('自测')}\n\n> ${normalizeMarkdown(question)}`)
+    parts.push(`> ${t('本节内容由「{title}」的 AI 分析整理，可在右侧向 AI 讲师追问以展开更多细节。', { title: analysis.title })}`)
     return { id: `analysis-${index}`, title, tier, summary, content: parts.join('\n\n') }
   })
 }
@@ -144,6 +146,16 @@ export interface Material {
   error?: string
   previewUrl?: string
   pages?: number
+  /** Server copy of the file (POST /api/uploads); builds send this instead of the file. */
+  uploadId?: string
+}
+
+/** One chunk of live speech-to-text from 上课中. */
+export interface TranscriptSegment {
+  id: string
+  text: string
+  startedAt: number
+  endedAt?: number
 }
 
 export type SectionStatus = 'empty' | 'building' | 'ready' | 'failed'
@@ -171,6 +183,10 @@ export interface Section {
   liveStartedAt?: number
   liveEndedAt?: number
   liveTopic?: string
+  /** Live speech-to-text of the lecture. */
+  transcript?: TranscriptSegment[]
+  /** Title was generated; it is replaced by the AI's title after the first build. */
+  autoTitle?: boolean
 }
 
 export interface Course {
@@ -187,7 +203,7 @@ export interface Course {
 }
 
 export function createSection(title: string): Section {
-  return { id: `section-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, title: title.trim() || '新小节', createdAt: Date.now(), status: 'empty', materials: [] }
+  return { id: `section-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, title: title.trim() || t('新小节'), createdAt: Date.now(), status: 'empty', materials: [] }
 }
 
 export const linuxKnowledgeMap: KnowledgeNode[] = [

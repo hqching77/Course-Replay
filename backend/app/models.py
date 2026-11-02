@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, BigInteger, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -248,6 +248,8 @@ class StudySection(Base):
     live_started_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     live_ended_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     live_topic: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Title was generated (e.g. "第 3 讲 · 11月2日"); replaced by the AI title after the first build.
+    auto_title: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
     )
@@ -264,6 +266,9 @@ class StudySection(Base):
     )
     class_questions: Mapped[list["ClassQuestion"]] = relationship(
         cascade="all, delete-orphan", order_by="ClassQuestion.position"
+    )
+    transcript: Mapped[list["TranscriptSegment"]] = relationship(
+        cascade="all, delete-orphan", order_by="TranscriptSegment.position"
     )
 
 
@@ -282,6 +287,8 @@ class StudyMaterial(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     preview_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     pages: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Server-side copy (uploaded_files.id), so the file survives a page reload until it is built.
+    upload_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
 
 class StudyMessage(Base):
@@ -327,3 +334,30 @@ class ClassQuestion(Base):
     status: Mapped[str] = mapped_column(String(16), default="answered")
     asked_ms: Mapped[int] = mapped_column(BigInteger, default=0)
     answered_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class TranscriptSegment(Base):
+    """One chunk of live speech-to-text from 上课中."""
+
+    __tablename__ = "transcript_segments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    section_id: Mapped[str] = mapped_column(ForeignKey("study_sections.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    client_id: Mapped[str] = mapped_column(String(200))
+    text: Mapped[str] = mapped_column(Text, default="")
+    started_ms: Mapped[int] = mapped_column(BigInteger, default=0)
+    ended_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class UploadedFile(Base):
+    """A course file uploaded ahead of a build (e.g. slides shared during class)."""
+
+    __tablename__ = "uploaded_files"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=True)
+    filename: Mapped[str] = mapped_column(Text)
+    stored_path: Mapped[str] = mapped_column(Text)
+    size: Mapped[int] = mapped_column(BigInteger, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

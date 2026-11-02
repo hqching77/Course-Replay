@@ -20,4 +20,10 @@ def health_check() -> HealthResponse:
         model=settings.openai_chat_model or None,
         office_conversion=office_conversion_available(),
         processing_mode="whole-page vision; no OCR",
+        stt_configured=settings.stt_configured,
+        stt_base_url=settings.stt_base_url,
+        stt_model=settings.stt_model or None,
+        database=settings.database_url.split(":", 1)[0].split("+", 1)[0],
+        ai_requires_login=settings.ai_requires_login,
+        custom_providers=settings.allow_custom_providers,
     )

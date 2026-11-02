@@ -15,7 +15,11 @@ FastAPI、SQLAlchemy 与 SQLite 构成的 Course Replay MVP 后端。
 - 用户账号：注册、登录、退出、修改昵称（`/api/auth/*`）。密码用 scrypt 加盐哈希，登录令牌只存 SHA-256 摘要，30 天滑动过期。
 - 每个用户的学习数据存数据库（`/api/workspace`）：课程、小节、材料记录、AI 讲稿、AI 讲师对话、探索支线、掌握度，以及「上课中」的课堂提问与回答。不同用户的数据互相隔离。
 - `POST /api/class/ask` 上课中即时问答：直接、简短地回答，结合「老师正在讲」和最近几次提问。
-- 构建时可附带 `class_questions`（课上提问），AI 会在相关知识点里加「课上疑问」小节解答。
+- 构建（`POST /api/process/start`）可以任意组合：直接上传的 `files`、之前 `POST /api/uploads` 存好的 `upload_ids`、上课中的 `transcript`（课堂转写）和 `class_questions`（课上提问）。AI 会把转写和提问整理进笔记，课上提问写成「课上疑问」小节。
+- `POST /api/transcribe` 语音转文字：浏览器把录音按停顿切成几秒一段的 WAV 发过来，转发给 OpenAI 兼容的 `/audio/transcriptions` 接口。默认硅基流动 `FunAudioLLM/SenseVoiceSmall`（免费，国内可用）。
+- `POST /api/ai/check` 真实调用一次对话模型，供「检查服务端配置」使用。
+- 用户可以在设置里换成自己的 AI / 语音接口：浏览器通过 `X-AI-*` / `X-STT-*` 请求头带上地址、模型和 Key，服务端只转发、不存储；自定义地址必须是 https 且不能指向内网（`ALLOW_PRIVATE_PROVIDER_URLS=true` 可放开，仅限本地开发）。
+- 请求头 `X-UI-Language: en` 时，AI 回答和生成的笔记使用英文。
 
 ## 启动
 
@@ -39,6 +43,18 @@ PPTX、DOCX 的完整视觉输入在 Windows 上可使用已安装的 Microsoft 
 - `AI_REQUIRES_LOGIN=true`（默认）时，`/api/process/start`、`/api/study/ask`、`/api/class/ask` 需要登录，避免匿名用户消耗 API Key。
 - `ALLOW_REGISTRATION=false` 可关闭公开注册。
 - 前端部署在别的域名（如 GitHub Pages）时，把该域名加入 `CORS_ORIGINS`，并在构建前端时设置 `VITE_API_BASE` 指向后端地址。
+
+## 语音转文字（上课中）
+
+在 `.env` 设置 `STT_API_KEY`（默认用硅基流动，在 cloud.siliconflow.cn 申请）。其他可选：
+
+| 服务 | STT_BASE_URL | STT_MODEL | 价格 |
+| --- | --- | --- | --- |
+| 硅基流动（默认） | https://api.siliconflow.cn/v1 | FunAudioLLM/SenseVoiceSmall | 免费模型 |
+| Groq | https://api.groq.com/openai/v1 | whisper-large-v3-turbo | $0.04/小时 |
+| OpenAI | https://api.openai.com/v1 | gpt-4o-mini-transcribe | $0.003/分钟 |
+
+也可以不配服务端，用户在设置里填自己的 Key，或选「浏览器内置」识别（免费，但 Chrome 的内置识别依赖 Google，国内网络一般用不了）。
 
 ## 测试
 

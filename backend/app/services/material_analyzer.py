@@ -189,14 +189,32 @@ def _class_questions_note(questions: list[str]) -> str:
     )
 
 
+def _transcript_note(transcript: str) -> str:
+    return (
+        "\n\n下面是本节课的课堂录音转写（自动语音识别，可能有错别字和断句错误，请按上下文理解）。"
+        "把老师讲的重点、例题和强调的地方整理进对应知识点；如果没有其他材料，就完全依据转写来组织讲稿：\n"
+        + transcript
+    )
+
+
 async def analyze_materials(
     documents: list[PreparedVisualDocument],
     provider: AIProvider,
     class_questions: list[str] | None = None,
+    transcript: str = "",
+    language: str = "zh",
 ) -> tuple[CourseMaterialAnalysis, dict[str, Any] | None]:
     intro = "请完整分析下面所有课堂材料，像讲师一样把每个知识点讲透（含例子），并组合成一条连贯的分层学习路径。"
     if class_questions:
         intro += _class_questions_note(class_questions)
+    if transcript.strip():
+        intro += _transcript_note(transcript.strip())
+    if language == "en":
+        intro += (
+            "\n\nIMPORTANT: Write ALL output in English — title, summary, learning_path, key_concepts, "
+            "review_questions, node titles and node bodies — even though the instructions and materials are in Chinese. "
+            "Use '### Questions from class' instead of '### 课上疑问'."
+        )
     content: list[dict[str, Any]] = [{"type": "text", "text": intro}]
     for document in documents:
         content.extend(document.content_parts)

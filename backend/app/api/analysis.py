@@ -9,16 +9,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
 
-from app.config import get_settings
-from app.models import User
+from app.config import Settings, get_settings
+from app.database import get_db
+from app.models import UploadedFile, User
 from app.schemas import (
+    AICheckResponse,
     ClassAskRequest,
     ClassAskResponse,
     StudyAskRequest,
     StudyAskResponse,
+    FileUploadRead,
+    TranscribeResponse,
     VisualDocumentInfo,
     VisualJobStartResponse,
     VisualJobStatus,
@@ -31,7 +36,8 @@ from app.services.visual_processor import (
     VisualProcessingError,
     prepare_visual_document,
 )
-from app.security import require_ai_access
+from app.providers import effective_settings, language_rule, reply_language, stt_config, transcribe_audio
+from app.security import get_optional_user, require_ai_access, require_stt_access
 
 
 router = APIRouter(tags=["visual-analysis"])
@@ -123,8 +129,13 @@ async def _run_visual_job(
     job: VisualJob,
     stored_files: list[tuple[Path, str]],
     class_questions: list[str] | None = None,
+    *,
+    ai_settings: Settings | None = None,
+    transcript: str = "",
+    language: str = "zh",
 ) -> None:
     settings = get_settings()
+    ai_settings = ai_settings or settings
     prepared = []
     try:
         job.status = "running"
@@ -156,8 +167,18 @@ async def _run_visual_job(
 
         job.stage = "model"
         job.progress = 58
-        job.message = f"AI 正在逐文件分析 {len(prepared)} 个文件共 {total_pages} 页"
-        analysis, usage = await analyze_materials(prepared, AIProvider(settings), class_questions=class_questions)
+        job.message = (
+            f"AI 正在逐文件分析 {len(prepared)} 个文件共 {total_pages} 页"
+            if prepared
+            else "AI 正在根据课堂转写整理笔记"
+        )
+        analysis, usage = await analyze_materials(
+            prepared,
+            AIProvider(ai_settings),
+            class_questions=class_questions,
+            transcript=transcript,
+            language=language,
+        )
 
         job.stage = "finalizing"
         job.progress = 92
@@ -175,7 +196,7 @@ async def _run_visual_job(
                 for index, document in enumerate(prepared)
             ],
             analysis=analysis,
-            model=settings.openai_chat_model,
+            model=ai_settings.openai_chat_model,
             usage=usage,
         )
         if job.work_dir:
@@ -218,17 +239,41 @@ def _parse_class_questions(raw: str | None) -> list[str]:
     return cleaned[:40]
 
 
+def _parse_upload_ids(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        items = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="upload_ids 格式错误") from exc
+    if not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="upload_ids 格式错误")
+    return [str(item) for item in items][:50]
+
+
+MAX_TRANSCRIPT_CHARS = 60000
+
+
 @router.post("/process/start", response_model=VisualJobStartResponse)
 async def start_visual_processing(
-    files: list[UploadFile] = File(...),
+    request: Request,
+    files: list[UploadFile] | None = File(default=None),
+    upload_ids: str | None = Form(default=None),
+    transcript: str | None = Form(default=None),
     class_questions: str | None = Form(default=None),
-    _user: User | None = Depends(require_ai_access),
+    user: User | None = Depends(require_ai_access),
+    db: Session = Depends(get_db),
 ) -> VisualJobStartResponse:
+    """Build notes for a section from any mix of files, earlier uploads and the class transcript."""
     settings = get_settings()
-    if not settings.ai_configured:
+    ai_settings = effective_settings(request)
+    if not ai_settings.ai_configured:
         raise HTTPException(status_code=503, detail="请在根目录 .env 配置 OPENAI_API_KEY 和 OPENAI_CHAT_MODEL")
-    if not files:
-        raise HTTPException(status_code=400, detail="至少上传一个文件")
+    files = files or []
+    uploaded = _owned_uploads(db, _parse_upload_ids(upload_ids), user)
+    transcript_text = (transcript or "").strip()[-MAX_TRANSCRIPT_CHARS:]
+    if not files and not uploaded and not transcript_text:
+        raise HTTPException(status_code=400, detail="至少上传一个文件或提供课堂转写")
     questions = _parse_class_questions(class_questions)
 
     job_id = str(uuid.uuid4())
@@ -238,7 +283,14 @@ async def start_visual_processing(
     total_bytes = 0
     max_bytes = settings.max_upload_mb * 1024 * 1024
     try:
-        for index, upload in enumerate(files):
+        # Files uploaded earlier (e.g. during class) come first, in the order the browser listed them.
+        for record in uploaded:
+            safe_name = Path(record.filename).name
+            stored_path = work_dir / f"{len(stored_files)}-{safe_name}"
+            shutil.copyfile(record.stored_path, stored_path)
+            stored_files.append((stored_path, safe_name))
+        for upload in files:
+            index = len(stored_files)
             safe_name = Path(upload.filename or f"upload-{index}").name
             if Path(safe_name).suffix.lower() not in VISUAL_SUPPORTED_EXTENSIONS:
                 raise HTTPException(status_code=415, detail=f"不支持的文件格式：{safe_name}")
@@ -259,8 +311,68 @@ async def start_visual_processing(
 
     job = VisualJob(job_id=job_id, filenames=[safe_name for _, safe_name in stored_files], work_dir=work_dir)
     jobs[job_id] = job
-    tasks[job_id] = asyncio.create_task(_run_visual_job(job, stored_files, questions))
+    tasks[job_id] = asyncio.create_task(_run_visual_job(
+        job,
+        stored_files,
+        questions,
+        ai_settings=ai_settings,
+        transcript=transcript_text,
+        language=reply_language(request),
+    ))
     return VisualJobStartResponse(job_id=job_id)
+
+
+def _owned_uploads(db: Session, ids: list[str], user: User | None) -> list[UploadedFile]:
+    records: list[UploadedFile] = []
+    for upload_id in ids:
+        record = db.get(UploadedFile, upload_id)
+        owner = user.id if user else None
+        if record is None or record.user_id != owner or not Path(record.stored_path).exists():
+            raise HTTPException(status_code=404, detail="找不到之前上传的文件，请重新上传")
+        records.append(record)
+    return records
+
+
+def _upload_user(user: User | None = Depends(get_optional_user)) -> User | None:
+    if user is None and get_settings().ai_requires_login:
+        raise HTTPException(status_code=401, detail="请先登录后再上传文件", headers={"WWW-Authenticate": "Bearer"})
+    return user
+
+
+@router.post("/uploads", response_model=FileUploadRead, status_code=201)
+async def upload_course_file(
+    file: UploadFile = File(...),
+    user: User | None = Depends(_upload_user),
+    db: Session = Depends(get_db),
+) -> FileUploadRead:
+    """Store a course file right away (e.g. slides shared mid-class) so a later build can use it."""
+    settings = get_settings()
+    safe_name = Path(file.filename or "upload").name
+    if Path(safe_name).suffix.lower() not in VISUAL_SUPPORTED_EXTENSIONS:
+        raise HTTPException(status_code=415, detail=f"不支持的文件格式：{safe_name}")
+    upload_id = str(uuid.uuid4())
+    folder = settings.artifacts_dir / "uploads" / upload_id
+    folder.mkdir(parents=True, exist_ok=True)
+    destination = folder / safe_name
+    size = 0
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    try:
+        with destination.open("wb") as output:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > max_bytes:
+                    raise HTTPException(status_code=413, detail=f"文件不能超过 {settings.max_upload_mb} MB")
+                output.write(chunk)
+    except Exception:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+    finally:
+        await file.close()
+    db.add(UploadedFile(
+        id=upload_id, user_id=user.id if user else None, filename=safe_name, stored_path=str(destination), size=size
+    ))
+    db.commit()
+    return FileUploadRead(id=upload_id, filename=safe_name, size=size)
 
 
 @router.get("/process")
@@ -281,9 +393,10 @@ def list_visual_jobs() -> list[dict[str, object]]:
 @router.post("/study/ask", response_model=StudyAskResponse)
 async def ask_study_question(
     request: StudyAskRequest,
+    http_request: Request,
     _user: User | None = Depends(require_ai_access),
 ) -> StudyAskResponse:
-    settings = get_settings()
+    settings = effective_settings(http_request)
     if not settings.ai_configured:
         raise HTTPException(status_code=503, detail="AI 服务尚未配置")
     system_prompt = """你是 Course Replay 的课程导师。请基于给定的课程材料和当前学习节点回答学生问题。
@@ -301,7 +414,7 @@ answer 字段内的段落之间保留空行，步骤或并列要点使用有序�
 换一种说法、简单澄清、重复提问、生成练习题时不要新增节点。node_title 不得与已有节点重复。
 当 allow_new_dialog 为 true，且问题与课程、当前节点和当前对话主题明显无关时，new_dialog 必须为 true，并给出简短 dialog_title。
 仅仅是从当前知识点自然延伸、追问课程相关概念时不要开启新对话。当 new_dialog 为 true 时，add_node 必须为 false。
-当 allow_new_dialog 为 false 时，new_dialog 必须为 false。默认使用简体中文。"""
+当 allow_new_dialog 为 false 时，new_dialog 必须为 false。""" + language_rule(reply_language(http_request))
     context = {
         "course_title": request.course_title,
         "current_topic": request.current_topic,
@@ -356,16 +469,17 @@ CLASS_ASK_PROMPT = """你是 Course Replay 的随堂助教。学生正在上课�
 - 全部控制在 250 字以内，使用 Markdown。
 - 结合课程、老师正在讲的内容和之前的提问理解问题；"为什么""再讲一下"这类追问默认指最近一次提问。
 - 课程材料没覆盖的内容可以用通用知识回答，但不要编造课程细节。
-默认使用简体中文。"""
+- 如果提供了课堂语音转写，优先结合老师刚讲的内容回答；转写可能有错别字，按上下文理解。"""
 
 
 @router.post("/class/ask", response_model=ClassAskResponse)
 async def ask_in_class(
     request: ClassAskRequest,
+    http_request: Request,
     _user: User | None = Depends(require_ai_access),
 ) -> ClassAskResponse:
     """上课中: answer a question immediately, in a short form suited to reading mid-lecture."""
-    settings = get_settings()
+    settings = effective_settings(http_request)
     if not settings.ai_configured:
         raise HTTPException(status_code=503, detail="AI 服务尚未配置")
     context_lines = [f"课程：{request.course_title}"]
@@ -377,9 +491,10 @@ async def ask_in_class(
         context_lines.append(f"本节材料摘要：{request.summary}")
     if request.key_concepts:
         context_lines.append(f"关键概念：{'、'.join(request.key_concepts)}")
-    messages: list[dict[str, str]] = [
-        {"role": "system", "content": f"{CLASS_ASK_PROMPT}\n\n" + "\n".join(context_lines)},
-    ]
+    if request.transcript.strip():
+        context_lines.append(f"老师最近讲的内容（语音转写，可能有错字）：\n{request.transcript.strip()[-4000:]}")
+    system = f"{CLASS_ASK_PROMPT}\n\n" + "\n".join(context_lines) + language_rule(reply_language(http_request))
+    messages: list[dict[str, str]] = [{"role": "system", "content": system}]
     for turn in request.recent[-4:]:
         if turn.question.strip() and turn.answer.strip():
             messages.append({"role": "user", "content": turn.question})
@@ -394,6 +509,65 @@ async def ask_in_class(
         answer = answer.removeprefix("```markdown").removeprefix("```").removesuffix("```").strip()
     return ClassAskResponse(answer=answer or "我暂时无法回答这个问题，可以换个说法再问一次。")
 
+
+@router.post("/ai/check", response_model=AICheckResponse)
+async def check_ai(request: Request, _user: User | None = Depends(require_ai_access)) -> AICheckResponse:
+    """Real round trip to the chat model the user has selected (server default or their own)."""
+    settings = effective_settings(request)
+    source = "custom" if request.headers.get("X-AI-Key") else "server"
+    if not settings.ai_configured:
+        return AICheckResponse(ok=False, source=source, base_url=settings.openai_base_url, error="AI 尚未配置")
+    started = time.perf_counter()
+    try:
+        reply = await AIProvider(settings).chat(
+            [{"role": "user", "content": "Reply with the single word OK."}], temperature=0, max_tokens=16
+        )
+    except Exception as exc:
+        return AICheckResponse(
+            ok=False, source=source, base_url=settings.openai_base_url, model=settings.openai_chat_model, error=str(exc)
+        )
+    return AICheckResponse(
+        ok=True,
+        source=source,
+        base_url=settings.openai_base_url,
+        model=settings.openai_chat_model,
+        latency_ms=round((time.perf_counter() - started) * 1000),
+        reply=reply.strip()[:40],
+    )
+
+
+@router.post("/transcribe", response_model=TranscribeResponse)
+async def transcribe(
+    request: Request,
+    file: UploadFile = File(...),
+    language: str | None = Form(default=None),
+    prompt: str | None = Form(default=None),
+    _user: User | None = Depends(require_stt_access),
+) -> TranscribeResponse:
+    """上课中: speech-to-text for one short audio chunk recorded in the browser."""
+    settings = get_settings()
+    config = stt_config(request)
+    if not config.configured:
+        raise HTTPException(status_code=503, detail="语音识别尚未配置：请在 .env 设置 STT_API_KEY，或在设置里填写自己的语音识别接口")
+    max_bytes = settings.max_audio_mb * 1024 * 1024
+    audio = await file.read(max_bytes + 1)
+    await file.close()
+    if len(audio) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"音频不能超过 {settings.max_audio_mb} MB")
+    if not audio:
+        raise HTTPException(status_code=400, detail="音频为空")
+    try:
+        text, latency = await transcribe_audio(
+            config,
+            audio,
+            Path(file.filename or "chunk.wav").name,
+            file.content_type or "audio/wav",
+            language=language,
+            prompt=prompt,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return TranscribeResponse(text=text, model=config.model, source=config.source, latency_ms=latency)
 
 @router.get("/process/{job_id}", response_model=VisualJobStatus)
 def get_visual_job(job_id: str) -> VisualJobStatus:

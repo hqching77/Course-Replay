@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, workspaceApi } from './api'
 import { Course, clearLocalCourses, defaultCourses, loadCourses, localCoursesToImport, normalizeCourses, saveCourses } from './data'
+import { t } from './i18n'
 import type { Session } from './session'
 
 export type SyncState = 'local' | 'saved' | 'saving' | 'error'
@@ -31,25 +32,42 @@ function hasPendingChanges(current: Course[], snapshot: Snapshot) {
  * Send what changed since the last successful sync. State updates are
  * immutable, so an unchanged course/section keeps its object identity and is
  * skipped; a changed section is sent whole.
+ *
+ * keepalive (tab hidden / page closing): fire every request at once so they
+ * all leave before the page goes away, and only then mark them as synced.
  */
-async function pushChanges(current: Course[], snapshot: Snapshot) {
+async function pushChanges(current: Course[], snapshot: Snapshot, keepalive = false) {
+  const inFlight: Promise<void>[] = []
+  const commits: (() => void)[] = []
+  const send = async (request: () => Promise<void>) => {
+    if (keepalive) inFlight.push(request())
+    else await request()
+  }
+  const commit = (apply: () => void) => {
+    if (keepalive) commits.push(apply)
+    else apply()
+  }
   const currentIds = new Set(current.map((course) => course.id))
   for (const id of [...snapshot.keys()]) {
     if (currentIds.has(id)) continue
-    await workspaceApi.deleteCourse(id)
-    snapshot.delete(id)
+    await send(() => workspaceApi.deleteCourse(id, keepalive))
+    commit(() => snapshot.delete(id))
   }
   for (const [position, course] of current.entries()) {
     const previous = snapshot.get(course.id)
     if (previous && previous.course === course && previous.position === position) continue
     if (!previous || previous.position !== position || courseFieldsChanged(previous.course, course)) {
-        await workspaceApi.putCourse(course, position)
+      await send(() => workspaceApi.putCourse(course, position, keepalive))
     }
     for (const [index, section] of course.sections.entries()) {
       if (previous?.course.sections.find((item) => item.id === section.id) === section) continue
-        await workspaceApi.putSection(course.id, section, index)
+      await send(() => workspaceApi.putSection(course.id, section, index, keepalive))
     }
-    snapshot.set(course.id, { course, position })
+    commit(() => snapshot.set(course.id, { course, position }))
+  }
+  if (keepalive) {
+    await Promise.all(inFlight)
+    commits.forEach((apply) => apply())
   }
 }
 
@@ -92,7 +110,7 @@ export function useCourseStore(session: Session, onExpired: () => void) {
       } else {
         // New account: bring over offline data from this browser if the user wants it, else start with the demo.
         const local = localCoursesToImport()
-        const importLocal = Boolean(local) && window.confirm(`这个浏览器里有离线模式的学习数据（${local!.length} 门课程），要导入到当前账号吗？\n选择“取消”则从演示课程开始。`)
+        const importLocal = Boolean(local) && window.confirm(t('这个浏览器里有离线模式的学习数据（{n} 门课程），要导入到当前账号吗？\n选择“取消”则从演示课程开始。', { n: local!.length }))
         clearLocalAfterSync.current = importLocal
         synced.current = new Map()
         setCourses(importLocal ? local! : defaultCourses)
@@ -106,7 +124,7 @@ export function useCourseStore(session: Session, onExpired: () => void) {
     return () => { cancelled = true }
   }, [account, reloadKey])
 
-  const flush = useCallback((): Promise<void> => {
+  const flush = useCallback((keepalive = false): Promise<void> => {
     window.clearTimeout(timer.current)
     if (!account) return Promise.resolve()
     if (running.current) {
@@ -117,7 +135,7 @@ export function useCourseStore(session: Session, onExpired: () => void) {
       try {
         do {
           dirty.current = false
-          await pushChanges(latest.current, synced.current)
+          await pushChanges(latest.current, synced.current, keepalive)
         } while (dirty.current)
         if (clearLocalAfterSync.current) {
           clearLocalCourses()
@@ -157,10 +175,14 @@ export function useCourseStore(session: Session, onExpired: () => void) {
 
   useEffect(() => {
     if (!account) return
-    const onHide = () => { if (document.visibilityState === 'hidden') void flush() }
+    // Tab hidden / page closing: send what's left right away, with keepalive so it survives the unload.
+    const onHide = () => { if (document.visibilityState === 'hidden') void flush(true) }
+    const onPageHide = () => { void flush(true) }
     document.addEventListener('visibilitychange', onHide)
+    window.addEventListener('pagehide', onPageHide)
     return () => {
       document.removeEventListener('visibilitychange', onHide)
+      window.removeEventListener('pagehide', onPageHide)
       window.clearTimeout(timer.current)
     }
   }, [account, flush])

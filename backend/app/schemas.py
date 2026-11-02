@@ -15,6 +15,12 @@ class HealthResponse(BaseModel):
     model: str | None
     office_conversion: bool
     processing_mode: str
+    stt_configured: bool = False
+    stt_base_url: str = ""
+    stt_model: str | None = None
+    database: str = "sqlite"
+    ai_requires_login: bool = True
+    custom_providers: bool = True
 
 
 class CourseCreate(BaseModel):
@@ -185,10 +191,35 @@ class ClassAskRequest(BaseModel):
     summary: str = Field(default="", max_length=4000)
     key_concepts: list[str] = Field(default_factory=list, max_length=30)
     recent: list[ClassAskTurn] = Field(default_factory=list, max_length=6)
+    # Last few minutes of the live transcript, so answers follow what the teacher just said.
+    transcript: str = Field(default="", max_length=8000)
 
 
 class ClassAskResponse(BaseModel):
     answer: str
+
+
+class AICheckResponse(BaseModel):
+    ok: bool
+    source: str  # "server" | "custom"
+    base_url: str
+    model: str | None = None
+    latency_ms: int | None = None
+    reply: str | None = None
+    error: str | None = None
+
+
+class TranscribeResponse(BaseModel):
+    text: str
+    model: str
+    source: str
+    latency_ms: int
+
+
+class FileUploadRead(BaseModel):
+    id: str
+    filename: str
+    size: int
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +278,14 @@ class WorkspaceMaterial(CamelModel):
     error: str | None = None
     preview_url: str | None = None
     pages: int | None = None
+    upload_id: str | None = Field(default=None, max_length=36)
+
+
+class WorkspaceTranscriptSegment(CamelModel):
+    id: ClientId
+    text: str = ""
+    started_at: int = 0
+    ended_at: int | None = None
 
 
 class WorkspaceMessage(CamelModel):
@@ -290,6 +329,8 @@ class WorkspaceSection(CamelModel):
     live_started_at: int | None = None
     live_ended_at: int | None = None
     live_topic: str | None = None
+    auto_title: bool | None = None
+    transcript: list[WorkspaceTranscriptSegment] | None = Field(default=None, max_length=5000)
 
 
 class WorkspaceCourse(CamelModel):

@@ -12,7 +12,7 @@ import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -107,20 +107,31 @@ def get_current_user(user: User | None = Depends(get_optional_user)) -> User:
     return user
 
 
-def require_ai_access(user: User | None = Depends(get_optional_user)) -> User | None:
-    """Gate for endpoints that spend the server's AI key.
-
-    When AI isn't configured the endpoint itself reports that (503), so the
-    login check only applies once there is a key to protect.
-    """
-    settings = get_settings()
-    if settings.ai_configured and settings.ai_requires_login and user is None:
+def _login_gate(configured: bool, user: User | None, detail: str) -> User | None:
+    if configured and get_settings().ai_requires_login and user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="请先登录后再使用 AI 功能",
+            detail=detail,
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
+
+
+def require_ai_access(request: Request, user: User | None = Depends(get_optional_user)) -> User | None:
+    """Gate for endpoints that call the chat/vision model.
+
+    When AI isn't configured the endpoint itself reports that (503), so the
+    login check only applies once there is a provider to use.
+    """
+    from app.providers import effective_settings
+
+    return _login_gate(effective_settings(request).ai_configured, user, "请先登录后再使用 AI 功能")
+
+
+def require_stt_access(request: Request, user: User | None = Depends(get_optional_user)) -> User | None:
+    from app.providers import stt_config
+
+    return _login_gate(stt_config(request).configured, user, "请先登录后再使用语音识别")
 
 
 def revoke_session(db: Session, authorization: str | None) -> None:

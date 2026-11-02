@@ -28,6 +28,18 @@ class Settings(BaseSettings):
     openai_embedding_model: str = ""
     openai_vision_model: str = ""
 
+    # Speech-to-text for 上课中. Any OpenAI-compatible /audio/transcriptions API.
+    # Default: SiliconFlow SenseVoiceSmall (free model, reachable from mainland China).
+    stt_api_key: str = ""
+    stt_base_url: str = "https://api.siliconflow.cn/v1"
+    stt_model: str = "FunAudioLLM/SenseVoiceSmall"
+    max_audio_mb: int = 25
+
+    # Users may pick their own AI / speech provider in 设置 (key kept in their browser).
+    allow_custom_providers: bool = True
+    # Custom provider URLs must resolve to public addresses unless this is on (e.g. a local model in dev).
+    allow_private_provider_urls: bool = False
+
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),
         env_file_encoding="utf-8",
@@ -37,6 +49,10 @@ class Settings(BaseSettings):
     @property
     def ai_configured(self) -> bool:
         return bool(self.openai_api_key and self.openai_chat_model)
+
+    @property
+    def stt_configured(self) -> bool:
+        return bool(self.stt_api_key and self.stt_model and self.stt_base_url)
 
     @property
     def cors_origin_list(self) -> list[str]:

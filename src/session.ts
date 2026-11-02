@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ApiError, User, authApi, getToken, serverReachable, setToken } from './api'
+import { t } from './i18n'
 
 const GUEST_KEY = 'course-replay-guest-v1'
 const GUEST_NAME_KEY = 'course-replay-guest-name-v1'
@@ -23,7 +24,7 @@ function storageSet(key: string, value: string | null) {
   }
 }
 
-const guestName = () => storageGet(GUEST_NAME_KEY) || '学习者'
+const guestName = () => storageGet(GUEST_NAME_KEY) || t('学习者')
 
 /**
  * Who is using the app. Signed-in users keep their data on the server; guests
@@ -41,9 +42,9 @@ export function useSession() {
       } catch (error) {
         if (error instanceof ApiError && error.status === 401) {
           setToken(null)
-          setSession({ status: 'signed-out', notice: '登录已过期，请重新登录' })
+          setSession({ status: 'signed-out', notice: '登录已过期，请重新登录' }) // i18n-ok: translated where shown
         } else {
-          setSession({ status: 'signed-out', notice: '暂时连不上服务器。可以稍后重试，或先用离线模式。' })
+          setSession({ status: 'signed-out', notice: '暂时连不上服务器。可以稍后重试，或先用离线模式。' }) // i18n-ok: translated where shown
         }
       }
       return
@@ -75,12 +76,12 @@ export function useSession() {
   const signOut = useCallback(async () => {
     await authApi.logout().catch(() => undefined)
     setToken(null)
-    setSession({ status: 'signed-out', notice: '已退出登录' })
+    setSession({ status: 'signed-out', notice: '已退出登录' }) // i18n-ok: translated where shown
   }, [])
 
   const expire = useCallback(() => {
     setToken(null)
-    setSession({ status: 'signed-out', notice: '登录已过期，请重新登录' })
+    setSession({ status: 'signed-out', notice: '登录已过期，请重新登录' }) // i18n-ok: translated where shown
   }, [])
 
   const rename = useCallback(async (name: string) => {
@@ -103,7 +104,7 @@ export type SessionControls = ReturnType<typeof useSession>
 export function displayNameOf(session: Session) {
   if (session.status === 'account') return session.user.display_name || session.user.username
   if (session.status === 'guest') return session.displayName
-  return '学习者'
+  return t('学习者')
 }
 
 export function initialsOf(name: string) {

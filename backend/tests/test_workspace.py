@@ -25,7 +25,7 @@ def demo_section(**overrides):
         "createdAt": 1730000000000,
         "status": "ready",
         "mastery": 47,
-        "materials": [{"id": "m1", "name": "补充材料.pdf", "meta": "26 页", "type": "PDF", "status": "ready", "pages": 26}],
+        "materials": [{"id": "m1", "name": "补充材料.pdf", "meta": "26 页", "type": "PDF", "status": "ready", "pages": 26, "uploadId": "u-1"}],
         "analysis": {"title": "Linux", "summary": "概览", "learning_path": ["pwd"], "key_concepts": ["路径"], "review_questions": []},
         "knowledgeMap": [{"id": "kn-1", "tier": "core", "title": "pwd", "summary": "s", "content": "## pwd"}],
         "chatHistory": [
@@ -39,6 +39,11 @@ def demo_section(**overrides):
         "liveStartedAt": 1730000000000,
         "liveEndedAt": 1730002700000,
         "liveTopic": "文件权限",
+        "autoTitle": True,
+        "transcript": [
+            {"id": "t1", "text": "今天讲文件权限。", "startedAt": 1730000005000, "endedAt": 1730000012000},
+            {"id": "t2", "text": "chmod 改权限。", "startedAt": 1730000013000},
+        ],
     }
     section.update(overrides)
     return {"courseId": "programming-linux", "position": 0, "section": section}
@@ -61,6 +66,7 @@ def test_workspace_round_trip(client):
     assert section["id"] == "linux-basics"
     assert section["createdAt"] == 1730000000000
     assert section["materials"][0]["type"] == "PDF"
+    assert section["materials"][0]["uploadId"] == "u-1"
     assert section["knowledgeMap"][0]["content"] == "## pwd"
     assert [m["id"] for m in section["chatHistory"]] == ["u1", "a1"]
     assert section["chatHistory"][1]["nodeId"] == "branch-1"
@@ -68,6 +74,9 @@ def test_workspace_round_trip(client):
     assert section["explorationNodes"][0]["parentId"] == "kn-1"
     assert section["classQuestions"][0]["answer"] == "属主 rwx，其他人 r-x。"
     assert section["liveTopic"] == "文件权限"
+    assert section["autoTitle"] is True
+    assert [seg["text"] for seg in section["transcript"]] == ["今天讲文件权限。", "chmod 改权限。"]
+    assert section["transcript"][0]["endedAt"] == 1730000012000 and "endedAt" not in section["transcript"][1]
     assert "processingJob" not in section
 
 
@@ -130,3 +139,19 @@ def test_course_order_and_section_for_unknown_course(client):
     missing = demo_section()
     missing["courseId"] = "nope"
     assert client.put("/api/workspace/section", json=missing, headers=headers).status_code == 404
+
+
+def test_added_columns_are_created_on_old_databases(tmp_path):
+    from sqlalchemy import create_engine, inspect, text
+
+    from app.database import ensure_added_columns
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'old.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE study_sections (id VARCHAR(36) PRIMARY KEY, title TEXT)"))
+        connection.execute(text("CREATE TABLE study_materials (id INTEGER PRIMARY KEY, name TEXT)"))
+    ensure_added_columns(engine)
+    ensure_added_columns(engine)  # idempotent
+    inspector = inspect(engine)
+    assert "auto_title" in {c["name"] for c in inspector.get_columns("study_sections")}
+    assert "upload_id" in {c["name"] for c in inspector.get_columns("study_materials")}
