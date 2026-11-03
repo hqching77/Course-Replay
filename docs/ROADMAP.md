@@ -85,11 +85,62 @@ Requires notes for every lecture in scope; lectures without notes need slides up
 
 ---
 
+## Feature 3: 导入课本 / 批量导入 (textbook and bulk import)
+
+Two kinds of material: one textbook as a single PDF (600+ pages, LaTeX), or a teacher's files split per section (1.1, 1.2 … 4.2). Both should end up grouped by chapter. **No AI for the splitting**: everything uses PyMuPDF, which the backend already has, so 600 pages take seconds.
+
+### Detecting the structure
+
+Many files (1.1, 1.2 …):
+- Read the number from the file name: `1.1`, `1-1`, `1_1`, `§1.1`, `Ch1.1`, `LA_4.2`, `第1章第1节`, `第一章` (Chinese numerals converted).
+- Sort numerically (1.2 before 1.10) and group by chapter.
+- Chapter title from the first file's first large-font heading; otherwise "第 N 章".
+- If a file name has no number, read it from the first heading on page 1 (e.g. "4.2 Eigenvalues").
+
+One big textbook, tried in this order:
+1. **PDF bookmarks.** LaTeX with `hyperref` embeds the whole table of contents (level, title, start page). Instant.
+2. **Printed contents pages.** Parse lines like `4.2 Eigenvalues ........ 213` from the 目录/Contents pages and map printed page numbers to PDF pages using page labels, or by finding the page where the title appears.
+3. **Large headings.** Find lines in a much bigger font than the body matching `Chapter 4` / `第4章` / `4.2 Title`.
+4. If all fail (scanned books): the user marks page ranges.
+
+Filters applied to the proposal:
+- 前言, 目录, Preface, Index, References, 参考文献 are excluded by default.
+- If bookmarks have a "Part I" level above chapters, use the level that holds the chapters.
+- "只导入到第 N 章" for an exam scope.
+
+### Flow: nothing is split until the user approves
+
+1. **Upload → analyse (read-only).** Files go to a temporary area and the server returns a proposed structure. Nothing is split and no 小节 is created.
+2. **Review page, after filtering:**
+   - each chapter with its title, page range (e.g. p. 15–62 · 48 页) or its files, ticked or unticked;
+   - excluded items stay visible, greyed, with the reason (e.g. "前言 · 自动排除"), so they can be ticked back;
+   - where the structure came from (e.g. "来自 PDF 书签");
+   - the first and last page of each chapter as thumbnails, to check every cut visually;
+   - controls: move a boundary ±1 page, edit titles, merge with the previous/next chapter, split at a page;
+   - changing the filter (e.g. 只导入到第 4 章) updates the proposal without uploading again;
+   - a summary, e.g. "将创建 4 个小节，共 212 页；排除 前言、目录、索引".
+3. **确认拆分 → only now:** chapters are cut into separate PDFs by page range (fast, no re-rendering) and each becomes a 小节 marked 待构建. **Cancel** deletes the temporary files and creates nothing.
+4. **Notes are built only on request,** per chapter or several in a queue, because AI over 600 pages at once is slow and costly. A 50-page chapter takes about 3 batches with the existing batch reading.
+
+The chapter structure also gives 考前冲刺 its scope ("期中范围：第 1–4 章") and topic order.
+
+### Testing
+- Generated PDFs with bookmarks, without bookmarks (contents page only), and with headings only.
+- Messy file names.
+- Real linear algebra files.
+- A 600-page document for speed.
+
+### Decisions still open
+- One 小节 per chapter with 1.1–1.3 inside (default), or one 小节 per section?
+- Show textbook chapters in their own group on the course page (课本章节), separate from the lecture sections (第 N 讲 · date)? Suggested: yes.
+
+---
+
 ## Order
 
 | Phase | When | What |
 | --- | --- | --- |
-| 1 | Now (midterm next week) | Weak-point record · minimal 考前冲刺 (diagnosis, daily plan, targeted practice) · teacher's emphasis from transcripts · past-paper upload |
+| 1 | Now (midterm next week) | 导入课本 / 批量导入 (so all exam material is in) · weak-point record · minimal 考前冲刺 (diagnosis, daily plan, targeted practice) · teacher's emphasis from transcripts · past-paper upload |
 | 2 | Next | 题目答疑 (check + guide) writing into the weak-point record · 错题本 with 今日复习 |
 | 3 | Later | 同类题 · formula sheet · deadlines/exam dates · 下课小测 |
 
