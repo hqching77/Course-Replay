@@ -1,3 +1,4 @@
+import { emphasisLines } from './exam'
 import type { ClassQuestion, Section, TranscriptSegment } from './data'
 import { normalizeMarkdown } from './data'
 import { t } from './i18n'
@@ -57,6 +58,7 @@ export function transcriptText(segments: TranscriptSegment[] | undefined, maxCha
 /** Transcript as a readable note with timestamps, for 课堂重放. */
 export function transcriptMarkdown(section: Section) {
   const segments = section.transcript || []
-  const lines = segments.map((segment) => `**${formatClock(segment.startedAt)}** ${segment.text.replace(/\s+/g, ' ').trim()}`)
+  const stressed = new Set(emphasisLines(section).map((line) => line.id))
+  const lines = segments.map((segment) => `**${formatClock(segment.startedAt)}** ${stressed.has(segment.id) ? `**★ ${t('老师强调')}** ` : ''}${segment.text.replace(/\s+/g, ' ').trim()}`)
   return [`## ${t('课堂转写')}`, `> ${t('上课时的语音转文字，共 {n} 段。自动识别可能有错字。', { n: segments.length })}`, ...lines].join('\n\n')
 }

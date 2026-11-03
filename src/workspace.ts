@@ -16,6 +16,8 @@ function courseFieldsChanged(before: Course, after: Course) {
     || before.updated !== after.updated
     || before.accent !== after.accent
     || JSON.stringify(before.tags) !== JSON.stringify(after.tags)
+    || before.weakPoints !== after.weakPoints
+    || before.exam !== after.exam
     || before.sections.length !== after.sections.length
     || before.sections.some((section, index) => section.id !== after.sections[index].id)
 }

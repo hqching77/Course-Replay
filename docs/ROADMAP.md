@@ -1,6 +1,6 @@
 # Roadmap: homework help, exam revision and weak-point memory
 
-Status: planned, not started. Agreed in discussion on 2026-11-03.
+Status: **Phase 1 done** (2026-11-03): 导入课本 / 批量导入, weak-point record, 考前冲刺, teacher's emphasis, past papers. Phase 2 not started. See "Phase 1 as built" below.
 
 ## The problems
 
@@ -23,10 +23,11 @@ Every feature below writes to and reads from one record per course.
 | Status | 薄弱 → 好转 → 已掌握 (cleared only after **two later correct answers** on that point) |
 
 Sources that feed it:
-- homework checks and guided sessions (题目答疑)
-- 自测题 answers in 课堂重放 (already graded by the AI tutor)
-- 课上提问: each question asked in class marks a moment of not understanding
-- knowledge points never opened in 课堂重放
+- homework checks and guided sessions (题目答疑) — Phase 2
+- 自测题 answers in 课堂重放, marked by the grader
+- 考前冲刺: wrong diagnosis answers and 我不会这个, and targeted practice
+
+Class questions (课上提问) and knowledge points never opened in 课堂重放 are **priority signals in the revision plan, not weak-point entries**: asking a question isn't a mistake, and an unopened note isn't evidence of not knowing it.
 
 The user can see the list, edit it, and remove entries.
 
@@ -137,16 +138,29 @@ The chapter structure also gives 考前冲刺 its scope ("期中范围：第 1�
 
 ---
 
+## Phase 1 as built
+
+- **Weak points** (`course.weakPoints`, synced and encrypted with the course): one entry per knowledge point (or per section when a question can't be matched to a point). Wrong or partly correct answers add evidence and reset the streak; two correct answers in a row → 已掌握. Shown on the course page under 薄弱点 with 读笔记, 练习, mark mastered and delete.
+- **Marking** (`POST /api/practice/grade`): verdict, mistake type, what went wrong, the correct answer; full steps only behind 看完整步骤. Used by 自测题 in 课堂重放 and by targeted practice.
+- **考前冲刺** (`/courses/:id/exam`, `course.exam`):
+  - setup: name, date, minutes per day, sections in scope (only sections with notes);
+  - diagnosis: 2 multiple-choice questions per point (`/api/practice/quiz`), with 我不会这个 / 我很熟，跳过 to decide a point at once; both right = 已掌握, one = 不太稳, none = 不会;
+  - plan: 不会 first, then 不太稳 (and undiagnosed points with strong signals), then the rest; within a band, points that are weak points, stressed in class or in past papers come first, then lecture order. Topics fill each day up to the time available, the day before the exam is for review, and what doesn't fit is listed separately. Two correct practice answers mark a point mastered and it drops out of the plan;
+  - targeted practice (`/api/practice/problems`): 3 problems from the note, previous mistakes and past-paper questions, each marked.
+- **Teacher's emphasis:** no AI. Transcript lines matching 要考 / 重点 / 很重要 / 记住 / 易错 … are matched to knowledge points by shared words (the line itself counts double against its neighbours). Shown as ★ in the transcript note and 老师强调过 in the plan.
+- **Past papers** (`/api/practice/past-paper`): the vision model copies each question and maps it to a knowledge point; counts appear as 往年考过 N 次 and practice follows those questions.
+- **Import:** as specified above (`/api/import/analyze`, `/thumb`, `/apply`, `DELETE`).
+
+All AI output uses the `@@TAG` text format rather than JSON, so LaTeX can't break parsing.
+
 ## Order
 
 | Phase | When | What |
 | --- | --- | --- |
-| 1 | Now (midterm next week) | 导入课本 / 批量导入 (so all exam material is in) · weak-point record · minimal 考前冲刺 (diagnosis, daily plan, targeted practice) · teacher's emphasis from transcripts · past-paper upload |
+| 1 | Done | 导入课本 / 批量导入 (so all exam material is in) · weak-point record · minimal 考前冲刺 (diagnosis, daily plan, targeted practice) · teacher's emphasis from transcripts · past-paper upload |
 | 2 | Next | 题目答疑 (check + guide) writing into the weak-point record · 错题本 with 今日复习 |
 | 3 | Later | 同类题 · formula sheet · deadlines/exam dates · 下课小测 |
 
-## Open questions before starting
+## Open questions
 
-- Which course is the midterm for, and does it have notes for every lecture in scope?
-- Are past midterm papers available?
-- Will homework usually arrive as photos of handwritten work, PDFs, or typed text?
+- Will homework usually arrive as photos of handwritten work, PDFs, or typed text? (decides the Phase 2 input)

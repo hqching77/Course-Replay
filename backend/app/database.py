@@ -38,7 +38,8 @@ def get_db() -> Generator[Session, None, None]:
 # existing table, so add them here (nullable, so no backfill is needed).
 ADDED_COLUMNS: dict[str, dict[str, str]] = {
     "users": {"preferences": "JSON"},
-    "study_sections": {"auto_title": "BOOLEAN", "study": "JSON"},
+    "study_sections": {"auto_title": "BOOLEAN", "study": "JSON", "chapter": "INTEGER"},
+    "study_courses": {"weak_points": "JSON", "exam": "JSON"},
     "study_materials": {"upload_id": "VARCHAR(36)"},
 }
 

@@ -5,6 +5,7 @@ import {
   BookOpen,
   Bot,
   BrainCircuit,
+  CalendarClock,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -43,7 +44,7 @@ import {
 } from 'lucide-react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Course, CourseAnalysis, KnowledgeNode, KnowledgeTier, Section, TIER_META, createSection, deriveKnowledgeMap, normalizeMarkdown } from './data'
-import { ApiError, apiFetch, authApi, openProtectedFile } from './api'
+import { ApiError, GradeResult, apiFetch, authApi, openProtectedFile, practiceApi } from './api'
 import { AccountView, syncLabel } from './account'
 import { AuthScreen, SplashScreen } from './AuthScreen'
 import { addMaterialFiles, autoSectionTitle, buildInputs, forgetStagedFile, startSectionBuild, titleFromAnalysis } from './build'
@@ -56,6 +57,11 @@ import { SettingsPage } from './SettingsPage'
 import { Markdown, NotFound, PageHeader, formatConceptLabel, trimText, updateSection } from './ui'
 import { useCourseStore } from './workspace'
 import { SearchDialog, TRANSCRIPT_NODE_ID, openSearch } from './Search'
+import { ImportPage } from './ImportPage'
+import { ExamPage } from './ExamPage'
+import { matchNode, recordAnswer } from './exam'
+import { GradeView } from './Practice'
+import { WeakPanel, updateCourse } from './WeakPanel'
 import { connectSemesterSync, disconnectSemesterSync, isCustomSemester, semesterName, semesterWeek, useSemester } from './semester'
 import { SemesterForm } from './SemesterForm'
 import { courseActivity, courseProgress, lastStudied, markStudied, pendingNodes, recordReview, sectionActivity, sectionNodes, sectionProgress, weekStudy } from './study'
@@ -160,6 +166,8 @@ function Workspace({ controls }: { controls: SessionControls }) {
             <Route path="/live" element={<LiveChooser {...page} />} />
             <Route path="/replay" element={<ReplayChooser courses={courses} />} />
             <Route path="/courses/:courseId" element={<CourseSections {...page} />} />
+            <Route path="/courses/:courseId/import" element={<ImportPage {...page} />} />
+            <Route path="/courses/:courseId/exam" element={<ExamPage {...page} />} />
             <Route path="/courses/:courseId/sections/:sectionId" element={<SectionDetail {...page} />} />
             <Route path="/courses/:courseId/sections/:sectionId/live" element={<LiveClass {...page} />} />
             <Route path="/courses/:courseId/sections/:sectionId/replay" element={<Replay {...page} />} />
@@ -390,7 +398,7 @@ function Dashboard({ courses, setCourses, notify }: PageProps) {
           <button className="new-course-card" onClick={() => setShowCreate(true)}><span><Plus size={22} /></span><strong>{t('创建新课程')}</strong><small>{t('导入课件，开始构建知识路径')}</small></button>
         </div>
       </section>
-      {showCreate && <CreateCourseModal onClose={() => setShowCreate(false)} onCreate={(course) => { setCourses([...courses, course]); setShowCreate(false); notify(t('课程已创建：点「开始上课」就能马上听课')); navigate(`/courses/${course.id}`) }} />}
+      {showCreate && <CreateCourseModal onClose={() => setShowCreate(false)} onCreate={(course, importNext) => { setCourses([...courses, course]); setShowCreate(false); notify(importNext ? t('课程已创建：选择要导入的课本或文件') : t('课程已创建：点「开始上课」就能马上听课')); navigate(importNext ? `/courses/${course.id}/import` : `/courses/${course.id}`) }} />}
     </div>
   )
 }
@@ -415,8 +423,9 @@ function CourseCard({ course, onDelete, onRename }: { course: Course; onDelete: 
   )
 }
 
-function CreateCourseModal({ onClose, onCreate }: { onClose: () => void; onCreate: (course: Course) => void }) {
+function CreateCourseModal({ onClose, onCreate }: { onClose: () => void; onCreate: (course: Course, importNext: boolean) => void }) {
   const semester = useSemester()
+  const [importNext, setImportNext] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const submit = (event: FormEvent) => {
@@ -424,9 +433,9 @@ function CreateCourseModal({ onClose, onCreate }: { onClose: () => void; onCreat
     if (!title.trim()) return
     // Random id: ids are stored unencrypted, so they must not contain the course name.
     const id = `course-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    onCreate({ id, title: title.trim(), description: description.trim() || t('一门新的课程，等待新建小节。'), code: `NEW · ${semesterName(semester)}`, tags: [t('新课程')], mastery: 0, updated: t('刚刚'), accent: '#c7f45d', sections: [] })
+    onCreate({ id, title: title.trim(), description: description.trim(), code: `NEW · ${semesterName(semester)}`, tags: [t('新课程')], mastery: 0, updated: t('刚刚'), accent: '#c7f45d', sections: [] }, importNext)
   }
-  return <div className="modal-backdrop" onMouseDown={onClose}><form className="modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">NEW COURSE</span><h2>{t('创建一门课程')}</h2></div><button type="button" className="icon-button" aria-label={t('关闭')} onClick={onClose}><X size={18} /></button></div><label>{t('课程名称')}<input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('例如：数字信号处理')} /></label><label>{t('课程简介')}<textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('这门课主要学习什么？')} /></label><div className="modal-actions"><button type="button" className="button ghost" onClick={onClose}>{t('取消')}</button><button className="button primary" disabled={!title.trim()}>{t('创建课程')} <ArrowRight size={16} /></button></div></form></div>
+  return <div className="modal-backdrop" onMouseDown={onClose}><form className="modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">NEW COURSE</span><h2>{t('创建一门课程')}</h2></div><button type="button" className="icon-button" aria-label={t('关闭')} onClick={onClose}><X size={18} /></button></div><label>{t('课程名称')}<input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('例如：数字信号处理')} /></label><label>{t('课程简介')}<textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('这门课主要学习什么？')} /></label><label className="modal-check"><input type="checkbox" checked={importNext} onChange={(event) => setImportNext(event.target.checked)} /><span><strong>{t('创建后导入课本或一批文件')}</strong><small>{t('一本课本 PDF 或 1.1、1.2…这样的讲义，按章自动分成小节，拆分前可以先检查')}</small></span></label><div className="modal-actions"><button type="button" className="button ghost" onClick={onClose}>{t('取消')}</button><button className="button primary" disabled={!title.trim()}>{t('创建课程')} <ArrowRight size={16} /></button></div></form></div>
 }
 
 function useCourse(courses: Course[]) {
@@ -481,7 +490,7 @@ function CourseSections({ courses, setCourses, notify }: PageProps) {
   }
   return <div className="page">
     <div className="back-row"><Link to="/"><ArrowLeft size={16} />{t('全部课程')}</Link><span>/</span><span>{course.title}</span></div>
-    <PageHeader title={course.title} subtitle={courseSubtitle(course)} actions={<><button className="button secondary" onClick={createSectionAndOpen}><Plus size={17} />{t('新建小节')}</button><button className="button primary" onClick={() => startLiveClass(course)}><Mic size={17} />{t('开始上课')}</button></>} />
+    <PageHeader title={course.title} subtitle={courseSubtitle(course)} actions={<><Link className="button secondary" to={`/courses/${course.id}/exam`}><CalendarClock size={17} />{course.exam ? t('考前冲刺 · {name}', { name: course.exam.name }) : t('考前冲刺')}</Link><Link className="button secondary" to={`/courses/${course.id}/import`}><Library size={17} />{t('批量导入')}</Link><button className="button secondary" onClick={createSectionAndOpen}><Plus size={17} />{t('新建小节')}</button><button className="button primary" onClick={() => startLiveClass(course)}><Mic size={17} />{t('开始上课')}</button></>} />
     <div className="overview-strip">
       <div><span>{t('小节')}</span><strong>{course.sections.length}</strong><small>{t('个独立单元')}</small></div>
       <div><span>{t('材料')}</span><strong>{stats.materials}</strong><small>{t('份课堂资料')}</small></div>
@@ -495,6 +504,7 @@ function CourseSections({ courses, setCourses, notify }: PageProps) {
         <button className="new-course-card" onClick={createSectionAndOpen}><span><Plus size={22} /></span><strong>{t('新建小节')}</strong><small>{t('只上传课件，生成笔记')}</small></button>
       </div>
     </section>
+    <WeakPanel course={course} setCourses={setCourses} />
   </div>
 }
 
@@ -834,6 +844,8 @@ function Replay({ courses, setCourses, notify }: PageProps) {
   }, [location.key, location.state])
   const [answer, setAnswer] = useState('')
   const [questionIndex, setQuestionIndex] = useState(0)
+  const [grading, setGrading] = useState(false)
+  const [graded, setGraded] = useState<{ question: string; answer: string; result: GradeResult } | null>(null)
   const [pathHidden, setPathHidden] = useState(false)
   const [chatMenu, setChatMenu] = useState(false)
   const [chat, setChat] = useState('')
@@ -905,13 +917,27 @@ function Replay({ courses, setCourses, notify }: PageProps) {
     if (material.previewUrl) openProtectedFile(material.previewUrl).catch((error) => notify(error instanceof Error ? error.message : t('打不开这个文档')))
   }
 
-  const submitAnswer = () => {
+  // 自测题 → marked by the grader, recorded in 薄弱点 under the knowledge point the question is about.
+  const submitAnswer = async () => {
     const text = answer.trim()
-    if (!text || !currentQuestion || asking) return
-    setAnswer('')
-    void ask(t('自测题：{question}\n\n我的回答：{answer}', { question: currentQuestion, answer: text }), 'grade')
+    const question = currentQuestion
+    if (!text || !question || grading) return
+    setGrading(true)
+    try {
+      const nodeId = matchNode(section, question) || undefined
+      const node = kmNodes.find((item) => item.id === nodeId)
+      const reference = [node?.content, ...orderedNodes.filter((item) => item.id !== nodeId).map((item) => `## ${item.title}\n${item.summary}`)].filter(Boolean).join('\n\n').slice(0, 7000)
+      const result = await practiceApi.grade({ question, answer: text, topic: node?.title || section.title, reference })
+      setGraded({ question, answer: text, result })
+      setAnswer('')
+      updateCourse(setCourses, course.id, (current) => recordAnswer(current, { sectionId: section.id, nodeId, topic: node?.title || section.title, verdict: result.verdict, kind: result.kind, source: 'selftest', question, note: result.feedback }))
+    } catch (error) {
+      notify(error instanceof Error ? error.message : t('批改失败，请重试'))
+    } finally {
+      setGrading(false)
+    }
   }
-  const ask = async (text?: string, mode: 'ask' | 'grade' = 'ask') => {
+  const ask = async (text?: string) => {
     const question = (text ?? chat).trim()
     if (!question || asking) return
     const userMessageId = `message-${Date.now()}-user`
@@ -930,7 +956,6 @@ function Replay({ courses, setCourses, notify }: PageProps) {
           course_title: `${course.title} · ${section.title}`,
           current_topic: currentTitle,
           current_content: activeContent.slice(0, 6000),
-          mode,
           summary: section.analysis?.summary || course.description,
           learning_path: section.analysis?.learning_path || kmNodes.map((node) => node.title),
           key_concepts: section.analysis?.key_concepts || course.tags,
@@ -1019,8 +1044,14 @@ function Replay({ courses, setCourses, notify }: PageProps) {
         <div className="chat-scroll">
           <div className="ai-message">{section.analysis ? <Markdown className="on-dark">{normalizeMarkdown(trimText(section.analysis.summary, 320))}</Markdown> : <p>{hasClassGroup ? t('这一节还没有生成讲稿，但可以先看课堂转写和课上提问；有问题直接问我。') : t('这一节还没有笔记。上传课件或用课堂转写生成笔记后，我会按讲稿给你讲解。')}</p>}{section.materials.some((material) => material.previewUrl) && <div className="citation-row">{section.materials.filter((material) => material.previewUrl).slice(0, 3).map((material, index) => <button key={material.id} title={t('查看文档')} onClick={() => openMaterial(material)}>[{index + 1}] {material.name}</button>)}</div>}</div>
           {currentQuestion && <div className="ai-message question-card"><span className="question-type">{t('自测题')} · {(questionIndex % reviewQuestions.length) + 1} / {reviewQuestions.length}</span><div className="q-text"><Markdown className="on-dark">{normalizeMarkdown(currentQuestion)}</Markdown></div>
-            <textarea className="review-answer" value={answer} disabled={asking} onChange={(event) => setAnswer(event.target.value)} placeholder={t('写下你的回答，AI 讲师会批改并给出参考要点…')} />
-            <div className="question-actions">{reviewQuestions.length > 1 && <button className="button secondary compact" onClick={() => { setQuestionIndex((value) => value + 1); setAnswer('') }}>{t('换一题')}</button>}<button className="button primary compact" disabled={!answer.trim() || asking} onClick={submitAnswer}>{t('提交给 AI 批改')}</button></div>
+            {graded?.question === currentQuestion ? <>
+              <div className="my-answer"><span>{t('我的回答')}</span><p>{graded.answer}</p></div>
+              <GradeView result={graded.result} dark />
+              <div className="question-actions"><button className="button secondary compact" onClick={() => setGraded(null)}>{t('再答一次')}</button>{reviewQuestions.length > 1 && <button className="button primary compact" onClick={() => { setQuestionIndex((value) => value + 1); setGraded(null) }}>{t('下一题')}</button>}</div>
+            </> : <>
+              <textarea className="review-answer" value={answer} disabled={grading} onChange={(event) => setAnswer(event.target.value)} placeholder={t('写下你的回答。AI 会判对错、指出错在哪；完整步骤要你点开才显示。')} />
+              <div className="question-actions">{reviewQuestions.length > 1 && <button className="button secondary compact" disabled={grading} onClick={() => { setQuestionIndex((value) => value + 1); setAnswer('') }}>{t('换一题')}</button>}<button className="button primary compact" disabled={!answer.trim() || grading} onClick={() => void submitAnswer()}>{grading ? <><RefreshCw className="spin-icon" size={14} />{t('批改中…')}</> : t('提交批改')}</button></div>
+            </>}
           </div>}
           {chatHistory.map((message) => message.role === 'user' ? <div className="user-message" key={message.id}>{message.content}</div> : <div className="ai-message compact-message" key={message.id}><Markdown className="on-dark">{normalizeMarkdown(message.content)}</Markdown>{message.nodeId && <button className="topology-jump" onClick={() => setSelected(message.nodeId!)}><GitBranchIcon />{t('已加入拓扑图 · 点击定位')}</button>}</div>)}
           {asking && <div className="ai-message compact-message thinking-message"><span className="mini-spinner" /><p>{t('正在结合当前节点判断是否需要扩展知识拓扑…')}</p></div>}

@@ -94,6 +94,7 @@ def _section_out(section: StudySection) -> WorkspaceSection:
         live_topic=section.live_topic,
         auto_title=section.auto_title,
         study=section.study,
+        chapter=section.chapter,
         transcript=[
             WorkspaceTranscriptSegment(id=item.client_id, text=item.text, started_at=item.started_ms, ended_at=item.ended_ms)
             for item in section.transcript
@@ -126,6 +127,8 @@ def read_workspace(user: User = Depends(get_current_user), db: Session = Depends
                 mastery=course.mastery,
                 updated=course.updated_label,
                 accent=course.accent,
+                weak_points=course.weak_points,
+                exam=course.exam,
                 sections=[_section_out(section) for section in course.sections],
             )
             for course in courses
@@ -151,6 +154,8 @@ def put_course(
     course.mastery = payload.mastery
     course.updated_label = payload.updated
     course.accent = payload.accent
+    course.weak_points = payload.weak_points
+    course.exam = payload.exam
     # Sections not in the list were deleted in the browser; the rest take its order.
     order = {section_id: index for index, section_id in enumerate(payload.section_ids)}
     for section in list(course.sections):
@@ -203,6 +208,7 @@ def put_section(
     section.live_topic = data.live_topic
     section.auto_title = data.auto_title
     section.study = data.study
+    section.chapter = data.chapter
     # Child lists are small and always sent whole, so replace them wholesale.
     section.materials = [
         StudyMaterial(

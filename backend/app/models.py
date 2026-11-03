@@ -219,6 +219,9 @@ class StudyCourse(Base):
     mastery: Mapped[float] = mapped_column(Float, default=0.0)
     updated_label: Mapped[str] = mapped_column(Text, default="")
     accent: Mapped[str] = mapped_column(String(32), default="#c7f45d")
+    # Weak points (topic, mistake type, evidence, status) and the 考前冲刺 plan, as the browser sends them.
+    weak_points: Mapped[list | None] = mapped_column(EncryptedJSON, nullable=True)
+    exam: Mapped[dict | None] = mapped_column(EncryptedJSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
@@ -255,6 +258,8 @@ class StudySection(Base):
     auto_title: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Study activity (studied knowledge points, last position, time per day), as the browser sends it.
     study: Mapped[dict | None] = mapped_column(EncryptedJSON, nullable=True)
+    # Chapter number when the section came from 导入课本 / 批量导入 (exam scope, ordering).
+    chapter: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
     )

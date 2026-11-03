@@ -1,5 +1,7 @@
 import { t } from './i18n'
 import type { SectionStudy } from './study'
+import type { WeakPoint } from './weak'
+import type { ExamPlan } from './exam'
 
 export type MaterialStatus = 'uploading' | 'pending' | 'ready' | 'processing' | 'failed' | 'cancelled'
 
@@ -193,6 +195,8 @@ export interface Section {
   autoTitle?: boolean
   /** Real study activity (studied knowledge points, time per day) — see study.ts. */
   study?: SectionStudy
+  /** Chapter number when the section came from 导入课本 / 批量导入. */
+  chapter?: number | null
 }
 
 export interface Course {
@@ -206,6 +210,10 @@ export interface Course {
   updated: string
   accent: string
   sections: Section[]
+  /** Weak-point record, fed by every marked answer (see weak.ts). */
+  weakPoints?: WeakPoint[]
+  /** 考前冲刺 plan (see exam.ts). */
+  exam?: ExamPlan
 }
 
 export function createSection(title: string): Section {

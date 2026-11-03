@@ -15,6 +15,26 @@ export interface User {
   preferences?: { semester?: { start: string; weeks: number; name?: string } }
 }
 
+// Server messages with a variable part (file name, size, provider error) → translated template.
+const DETAIL_PATTERNS: [RegExp, string][] = [
+  [/^不支持的文件格式：(?<name>.+)$/s, '不支持的文件格式：{name}'], // i18n-ok: server message pattern
+  [/^文件不能超过 (?<mb>\d+) MB：(?<name>.+)$/s, '文件不能超过 {mb} MB：{name}'], // i18n-ok: server message pattern
+  [/^文件不能超过 (?<mb>\d+) MB$/, '文件不能超过 {mb} MB'], // i18n-ok: server message pattern
+  [/^本次上传总大小不能超过 (?<mb>\d+) MB$/, '本次上传总大小不能超过 {mb} MB'], // i18n-ok: server message pattern
+  [/^音频不能超过 (?<mb>\d+) MB$/, '音频不能超过 {mb} MB'], // i18n-ok: server message pattern
+  [/^一次最多导入 (?<n>\d+) 个文件$/, '一次最多导入 {n} 个文件'], // i18n-ok: server message pattern
+  [/^AI 回答失败：(?<error>.+)$/s, 'AI 回答失败：{error}'], // i18n-ok: server message pattern
+  [/^AI 读试卷失败：(?<error>.+)$/s, 'AI 读试卷失败：{error}'], // i18n-ok: server message pattern
+]
+
+function translateDetail(detail: string) {
+  for (const [pattern, key] of DETAIL_PATTERNS) {
+    const match = detail.match(pattern)
+    if (match) return t(key, match.groups)
+  }
+  return t(detail)
+}
+
 export class ApiError extends Error {
   status: number
   constructor(message: string, status: number) {
@@ -71,7 +91,7 @@ export async function apiFetch<T = unknown>(path: string, options: ApiOptions = 
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
     const detail = typeof payload.detail === 'string' ? payload.detail : Array.isArray(payload.detail) ? describeValidation(payload.detail) : ''
-    throw new ApiError((detail && t(detail)) || (getLang() === 'en' ? `Request failed (HTTP ${response.status})` : `请求失败（HTTP ${response.status}）`), response.status) // i18n-ok: bilingual
+    throw new ApiError((detail && translateDetail(detail)) || (getLang() === 'en' ? `Request failed (HTTP ${response.status})` : `请求失败（HTTP ${response.status}）`), response.status) // i18n-ok: bilingual
   }
   return payload as T
 }
@@ -90,6 +110,55 @@ function describeValidation(items: { loc?: unknown[]; msg?: string }[]) {
  * Previews are private to their owner, so the request carries the sign-in token
  * and the tab shows a local copy.
  */
+/** An image (or other file) from the backend that needs the sign-in token, as a local blob URL. */
+export async function protectedBlobUrl(path: string, signal?: AbortSignal) {
+  const headers: Record<string, string> = authToken ? { Authorization: `Bearer ${authToken}` } : {}
+  const response = await fetch(apiUrl(path), { headers, signal })
+  if (!response.ok) throw new ApiError(`HTTP ${response.status}`, response.status)
+  return URL.createObjectURL(await response.blob())
+}
+
+export interface ImportPart { file_index: number; start: number; end: number }
+export interface ImportChapter { key: string; number: number | null; label: 'chapter' | 'lecture'; title: string; parts: ImportPart[]; pages: number; files: string[]; excluded: string | null }
+export interface ImportProposal {
+  import_id: string
+  mode: 'book' | 'files'
+  method: 'bookmarks' | 'contents' | 'headings' | 'filenames' | 'manual'
+  total_pages: number
+  files: { name: string; pages: number | null; size: number }[]
+  chapters: ImportChapter[]
+}
+export interface AppliedImport { chapters: { title: string; uploads: { id: string; filename: string; size: number; pages: number | null }[] }[] }
+
+export interface QuizQuestion { key: string; question: string; options: string[]; answer: number; explanation: string }
+export interface GradeResult { verdict: 'correct' | 'partial' | 'wrong'; kind: 'concept' | 'start' | 'calc' | 'careless' | null; feedback: string; answer: string; solution: string }
+export interface PracticeProblem { question: string; answer: string; hint: string }
+type TopicPayload = { key: string; title: string; content?: string }
+
+/** Weak points and 考前冲刺: diagnosis questions, marking, targeted practice, past papers. */
+export const practiceApi = {
+  quiz: (courseTitle: string, topics: TopicPayload[], perTopic = 2) =>
+    apiFetch<{ questions: QuizQuestion[] }>('/api/practice/quiz', { ai: true, json: { course_title: courseTitle, topics, per_topic: perTopic } }),
+  grade: (payload: { question: string; answer: string; topic?: string; reference?: string }) =>
+    apiFetch<GradeResult>('/api/practice/grade', { ai: true, json: payload }),
+  problems: (payload: { topic: string; content?: string; count?: number; past_questions?: string[]; mistakes?: string[] }) =>
+    apiFetch<{ problems: PracticeProblem[] }>('/api/practice/problems', { ai: true, json: payload }),
+  pastPaper: (uploadIds: string[], topics: TopicPayload[]) =>
+    apiFetch<{ questions: { text: string; topic_key: string | null }[] }>('/api/practice/past-paper', { ai: true, json: { upload_ids: uploadIds, topics } }),
+}
+
+/** 导入课本 / 批量导入: propose chapters (read-only), then split only when the user confirms. */
+export const importApi = {
+  analyze: (files: File[]) => {
+    const form = new FormData()
+    files.forEach((file) => form.append('files', file, file.name))
+    return apiFetch<ImportProposal>('/api/import/analyze', { method: 'POST', body: form })
+  },
+  apply: (importId: string, chapters: { title: string; parts: ImportPart[] }[]) => apiFetch<AppliedImport>(`/api/import/${importId}/apply`, { method: 'POST', json: { chapters } }),
+  cancel: (importId: string) => apiFetch<void>(`/api/import/${importId}`, { method: 'DELETE' }),
+  thumbPath: (importId: string, file: number, page: number) => `/api/import/${importId}/thumb?file=${file}&page=${page}`,
+}
+
 export async function openProtectedFile(path: string) {
   const tab = window.open('', '_blank') // open now, inside the click, so pop-up blockers allow it
   try {

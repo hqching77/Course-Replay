@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -167,8 +167,6 @@ class StudyAskRequest(BaseModel):
     allow_new_dialog: bool = True
     # The lecture text of the knowledge point on screen, so answers match what the student is reading.
     current_content: str = Field(default="", max_length=8000)
-    # "grade": the question is a self-test answer to check (no new topology node).
-    mode: Literal["ask", "grade"] = "ask"
 
 
 class StudyAskResponse(BaseModel):
@@ -362,6 +360,7 @@ class WorkspaceSection(CamelModel):
     transcript: list[WorkspaceTranscriptSegment] | None = Field(default=None, max_length=5000)
     # Study activity: knowledge points studied, last position, minutes per day (dashboard stats).
     study: dict[str, Any] | None = None
+    chapter: int | None = None
 
 
 class WorkspaceCourse(CamelModel):
@@ -373,6 +372,8 @@ class WorkspaceCourse(CamelModel):
     mastery: float = 0
     updated: str = ""
     accent: str = Field(default="#c7f45d", max_length=32)
+    weak_points: list[dict[str, Any]] | None = Field(default=None, max_length=2000)
+    exam: dict[str, Any] | None = None
     sections: list[WorkspaceSection] = Field(default_factory=list)
 
 
@@ -391,6 +392,8 @@ class WorkspaceCoursePut(CamelModel):
     mastery: float = 0
     updated: str = ""
     accent: str = Field(default="#c7f45d", max_length=32)
+    weak_points: list[dict[str, Any]] | None = Field(default=None, max_length=2000)
+    exam: dict[str, Any] | None = None
     position: int = 0
     section_ids: list[str] = Field(default_factory=list, max_length=500)
 
