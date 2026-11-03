@@ -1,7 +1,7 @@
 import { ArrowLeft, ChevronLeft, ChevronRight, FileText, Merge, RefreshCw, Scissors, UploadCloud, X } from 'lucide-react'
 import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ImportPart, ImportProposal, importApi, protectedBlobUrl } from './api'
+import { ImportFileMeta, ImportPart, ImportProposal, importApi, protectedBlobUrl } from './api'
 import { Course, Material, createSection } from './data'
 import { t, useLang } from './i18n'
 import { NotFound, PageHeader } from './ui'
@@ -43,16 +43,71 @@ function formatBytes(bytes: number) {
 }
 
 /** A page image from the import (needs the sign-in token, so it is fetched, not linked). */
-function Thumb({ importId, file, page, caption }: { importId: string; file: number; page: number; caption: string }) {
+function usePageImage(importId: string, file: number, page: number, width: number) {
   const [url, setUrl] = useState('')
+  const [failed, setFailed] = useState(false)
   useEffect(() => {
     const controller = new AbortController()
     let created = ''
     setUrl('')
-    protectedBlobUrl(importApi.thumbPath(importId, file, page), controller.signal).then((value) => { created = value; setUrl(value) }).catch(() => undefined)
+    setFailed(false)
+    protectedBlobUrl(importApi.thumbPath(importId, file, page, width), controller.signal)
+      .then((value) => { created = value; setUrl(value) })
+      .catch(() => { if (!controller.signal.aborted) setFailed(true) })
     return () => { controller.abort(); if (created) URL.revokeObjectURL(created) }
-  }, [importId, file, page])
-  return <figure className="import-thumb">{url ? <img src={url} alt={caption} /> : <span className="mini-spinner" />}<figcaption>{caption}</figcaption></figure>
+  }, [importId, file, page, width])
+  return { url, failed }
+}
+
+function Thumb({ importId, file, page, caption, width = 260, onOpen }: { importId: string; file: number; page: number; caption?: string; width?: number; onOpen?: () => void }) {
+  const { url } = usePageImage(importId, file, page, width)
+  const image = url ? <img src={url} alt={caption || ''} /> : <span className="import-thumb-loading"><span className="mini-spinner" /></span>
+  return <figure className="import-thumb">
+    {onOpen ? <button type="button" className="import-thumb-open" onClick={onOpen} title={t('放大预览')} aria-label={t('放大预览')}>{image}</button> : image}
+    {caption && <figcaption>{caption}</figcaption>}
+  </figure>
+}
+
+type PreviewAt = { file: number; page: number }
+
+/** Read pages before splitting: page by page, and on to the next file (useful when file names say nothing). */
+function PagePreview({ importId, files, start, onClose }: { importId: string; files: ImportFileMeta[]; start: PreviewAt; onClose: () => void }) {
+  const [at, setAt] = useState(start)
+  const { url, failed } = usePageImage(importId, at.file, at.page, 1000)
+  const meta = files[at.file]
+  const pagesIn = (index: number) => files[index]?.pages || 1
+  const viewable = files.map((item, index) => (item.preview ? index : -1)).filter((index) => index >= 0)
+  const position = viewable.indexOf(at.file)
+  const prevFile = position > 0 ? viewable[position - 1] : undefined
+  const nextFile = position >= 0 && position < viewable.length - 1 ? viewable[position + 1] : undefined
+  const canPrev = at.page > 1 || prevFile !== undefined
+  const canNext = at.page < pagesIn(at.file) || nextFile !== undefined
+  const prev = () => setAt((current) => current.page > 1 ? { ...current, page: current.page - 1 } : prevFile !== undefined ? { file: prevFile, page: pagesIn(prevFile) } : current)
+  const next = () => setAt((current) => current.page < pagesIn(current.file) ? { ...current, page: current.page + 1 } : nextFile !== undefined ? { file: nextFile, page: 1 } : current)
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+      else if (event.key === 'ArrowLeft') prev()
+      else if (event.key === 'ArrowRight') next()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+  return <div className="modal-backdrop" onMouseDown={onClose}>
+    <div className="modal import-preview" role="dialog" aria-label={t('页面预览')} onMouseDown={(event) => event.stopPropagation()}>
+      <div className="modal-head"><div>
+        <span className="eyebrow">{files.length > 1 ? t('文件 {i} / {n}', { i: at.file + 1, n: files.length }) : t('页面预览')}</span>
+        <h2>{meta?.name}</h2>
+        {meta?.title && <p className="import-preview-title">{t('第一页：{title}', { title: meta.title })}</p>}
+      </div><button type="button" className="icon-button" aria-label={t('关闭')} onClick={onClose}><X size={18} /></button></div>
+      <div className="import-preview-page">{url ? <img src={url} alt={t('第 {page} 页', { page: at.page })} /> : failed ? <p>{t('这一页预览失败')}</p> : <span className="mini-spinner" />}</div>
+      <div className="import-preview-nav">
+        <button type="button" className="button secondary" disabled={!canPrev} onClick={prev}><ChevronLeft size={16} />{at.page > 1 ? t('上一页') : t('上一个文件')}</button>
+        <span>{t('第 {page} / {pages} 页', { page: at.page, pages: pagesIn(at.file) })}</span>
+        <button type="button" className="button secondary" disabled={!canNext} onClick={next}>{at.page < pagesIn(at.file) ? t('下一页') : t('下一个文件')}<ChevronRight size={16} /></button>
+      </div>
+    </div>
+  </div>
 }
 
 /**
@@ -70,6 +125,7 @@ export function ImportPage({ courses, setCourses, notify }: { courses: Course[];
   const [proposal, setProposal] = useState<ImportProposal | null>(null)
   const [rows, setRows] = useState<Row[]>([])
   const [upTo, setUpTo] = useState<number | ''>('')
+  const [preview, setPreview] = useState<PreviewAt | null>(null)
 
   const book = proposal?.mode === 'book'
   const numbers = useMemo(() => [...new Set(rows.map((row) => row.number).filter((n): n is number => n !== null))].sort((a, b) => a - b), [rows])
@@ -234,18 +290,25 @@ export function ImportPage({ courses, setCourses, notify }: { courses: Course[];
             </div>
             {book ? <div className="import-range">
               <div className="import-edge">
-                <Thumb importId={proposal.import_id} file={first.file_index} page={first.start} caption={t('第一页 · p.{page}', { page: first.start })} />
+                <Thumb importId={proposal.import_id} file={first.file_index} page={first.start} caption={t('第一页 · p.{page}', { page: first.start })} onOpen={() => setPreview({ file: first.file_index, page: first.start })} />
                 <div className="import-nudge"><button className="icon-button tiny" aria-label={t('开始页往前一页')} onClick={() => nudge(index, 'start', -1)}><ChevronLeft size={14} /></button><span>p.{first.start}</span><button className="icon-button tiny" aria-label={t('开始页往后一页')} onClick={() => nudge(index, 'start', 1)}><ChevronRight size={14} /></button></div>
               </div>
               <div className="import-pages">{t('{n} 页', { n: pagesOf(row.parts) })}<small>p.{first.start}–{last.end}</small></div>
               <div className="import-edge">
-                <Thumb importId={proposal.import_id} file={last.file_index} page={last.end} caption={t('最后一页 · p.{page}', { page: last.end })} />
+                <Thumb importId={proposal.import_id} file={last.file_index} page={last.end} caption={t('最后一页 · p.{page}', { page: last.end })} onOpen={() => setPreview({ file: last.file_index, page: last.end })} />
                 <div className="import-nudge"><button className="icon-button tiny" aria-label={t('结束页往前一页')} onClick={() => nudge(index, 'end', -1)}><ChevronLeft size={14} /></button><span>p.{last.end}</span><button className="icon-button tiny" aria-label={t('结束页往后一页')} onClick={() => nudge(index, 'end', 1)}><ChevronRight size={14} /></button></div>
               </div>
             </div> : <ul className="import-files">
               {row.parts.map((part, partIndex) => {
                 const meta = proposal.files[part.file_index]
-                return <li key={`${part.file_index}-${partIndex}`}><FileText size={14} /><span>{row.files[partIndex] || meta?.name}</span><small>{meta?.pages ? t('{n} 页', { n: meta.pages }) : formatBytes(meta?.size || 0)}</small>
+                const open = meta?.preview ? () => setPreview({ file: part.file_index, page: part.start || 1 }) : undefined
+                return <li key={`${part.file_index}-${partIndex}`}>
+                  {open ? <Thumb importId={proposal.import_id} file={part.file_index} page={part.start || 1} width={96} onOpen={open} /> : <span className="import-file-icon"><FileText size={18} /></span>}
+                  <button type="button" className="import-file-name" onClick={open} disabled={!open} title={open ? t('预览') : t('这种文件没有页面预览')}>
+                    <span>{row.files[partIndex] || meta?.name}</span>
+                    {meta?.title && <small>{t('第一页：{title}', { title: meta.title })}</small>}
+                  </button>
+                  <small>{meta?.pages ? t('{n} 页', { n: meta.pages }) : formatBytes(meta?.size || 0)}</small>
                   {rows.length > 1 && <select aria-label={t('移到其他章')} value="" onChange={(event) => event.target.value && moveFile(index, partIndex, event.target.value)}><option value="">{t('移到…')}</option>{rows.filter((other) => other.key !== row.key).map((other) => <option key={other.key} value={other.key}>{other.name}</option>)}</select>}
                 </li>
               })}
@@ -260,5 +323,6 @@ export function ImportPage({ courses, setCourses, notify }: { courses: Course[];
         <button className="button primary" disabled={!chosen.length || step === 'applying'} onClick={() => void confirm()}>{step === 'applying' ? <RefreshCw className="spin-icon" size={16} /> : <Scissors size={16} />}{t('确认拆分')}</button>
       </div>
     </>}
+    {proposal && preview && <PagePreview importId={proposal.import_id} files={proposal.files} start={preview} onClose={() => setPreview(null)} />}
   </div>
 }

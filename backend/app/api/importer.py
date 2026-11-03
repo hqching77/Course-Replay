@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 
 import fitz
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -24,7 +24,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import UploadedFile, User
 from app.security import get_optional_user
-from app.services.book_structure import Chapter, analyze_book, analyze_files, pdf_pages
+from app.services.book_structure import Chapter, analyze_book, analyze_files, first_page_title, pdf_pages
 from app.services.visual_processor import VISUAL_SUPPORTED_EXTENSIONS
 
 router = APIRouter(tags=["import"])
@@ -55,6 +55,10 @@ class ImportFile(BaseModel):
     name: str
     pages: int | None = None
     size: int
+    # The largest text on page 1, so files with meaningless names can still be recognised.
+    title: str = ""
+    # Whether /thumb can show its pages (PDFs and images).
+    preview: bool = False
 
 
 class ImportProposal(BaseModel):
@@ -176,6 +180,9 @@ async def analyze_import(files: list[UploadFile] = File(...), user: User | None 
             mode, method = "files", "filenames"
             chapters = analyze_files(paths)
             total = sum(item["pages"] or 0 for item in stored)
+        if mode == "files":
+            for item in stored:
+                item["title"] = first_page_title(folder / item["path"])
     except Exception:
         shutil.rmtree(folder, ignore_errors=True)
         raise
@@ -187,25 +194,38 @@ async def analyze_import(files: list[UploadFile] = File(...), user: User | None 
         mode=mode,
         method=method,
         total_pages=total,
-        files=[ImportFile(name=item["name"], pages=item["pages"], size=item["size"]) for item in stored],
+        files=[ImportFile(name=item["name"], pages=item["pages"], size=item["size"], title=item.get("title", ""), preview=_previewable(item["path"])) for item in stored],
         chapters=[_chapter_out(index, chapter) for index, chapter in enumerate(chapters)],
     )
 
 
+PREVIEW_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
+
+
+def _previewable(name: str) -> bool:
+    return Path(name).suffix.lower() in PREVIEW_SUFFIXES
+
+
 @router.get("/import/{import_id}/thumb")
-def import_thumbnail(import_id: str, file: int = 0, page: int = 1, user: User | None = Depends(_import_user)) -> Response:
-    """A small image of one page, to check where a chapter starts and ends."""
+def import_thumbnail(
+    import_id: str,
+    file: int = 0,
+    page: int = 1,
+    width: int = Query(default=260, ge=80, le=1400),
+    user: User | None = Depends(_import_user),
+) -> Response:
+    """One page as an image: small to check where a chapter starts and ends, large to read before splitting."""
     folder, meta = _load(import_id, user)
     if not 0 <= file < len(meta["files"]):
         raise HTTPException(status_code=404, detail="文件不存在")
     path = folder / meta["files"][file]["path"]
-    if path.suffix.lower() != ".pdf":
-        raise HTTPException(status_code=404, detail="只有 PDF 有页面预览")
+    if not _previewable(path.name):
+        raise HTTPException(status_code=404, detail="这种文件没有页面预览")
     with fitz.open(path) as doc:
         if not 1 <= page <= len(doc):
             raise HTTPException(status_code=404, detail="页码超出范围")
         target = doc[page - 1]
-        zoom = 260 / max(target.rect.width, 1)
+        zoom = width / max(target.rect.width, 1)
         image = target.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False).tobytes("png")
     return Response(content=image, media_type="image/png", headers={"Cache-Control": "private, max-age=3600"})
 

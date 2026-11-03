@@ -117,3 +117,54 @@ def test_book_without_bookmarks_uses_the_headings(client):
     proposal = client.post("/api/import/analyze", files=[("files", ("book.pdf", textbook(bookmarks=False), "application/pdf"))], headers=headers).json()
     assert proposal["method"] == "headings"
     assert [c["parts"][0]["start"] for c in proposal["chapters"] if not c["excluded"]] == [4, 13, 25, 35]
+
+
+def test_files_show_what_page_one_says_and_can_be_previewed(client):
+    headers = auth_header(register(client, "preview-user").json()["token"])
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 60), "Lecture notes - week 5", fontsize=9)
+    page.insert_text((72, 120), "Eigenvalues and", fontsize=22)
+    page.insert_text((72, 150), "Eigenvectors", fontsize=22)
+    page.insert_text((72, 200), "body text " * 6, fontsize=10)
+    doc.new_page()
+    titled = doc.tobytes()
+    image = fitz.open()
+    image.new_page(width=200, height=100).insert_text((20, 50), "photo", fontsize=14)
+    png = image[0].get_pixmap().tobytes("png")
+    files = [
+        ("files", ("x7f3k2.pdf", titled, "application/pdf")),
+        ("files", ("IMG_0042.png", png, "image/png")),
+        ("files", ("notes.md", b"# hello", "text/markdown")),
+    ]
+    proposal = client.post("/api/import/analyze", files=files, headers=headers).json()
+    by_name = {item["name"]: item for item in proposal["files"]}
+    assert by_name["x7f3k2.pdf"]["title"] == "Eigenvalues and Eigenvectors"
+    assert [by_name[name]["preview"] for name in ("x7f3k2.pdf", "IMG_0042.png", "notes.md")] == [True, True, False]
+
+    index = [item["name"] for item in proposal["files"]]
+    thumb = f"/api/import/{proposal['import_id']}/thumb"
+    small = client.get(thumb, params={"file": index.index("x7f3k2.pdf"), "page": 2}, headers=headers)
+    large = client.get(thumb, params={"file": index.index("x7f3k2.pdf"), "page": 2, "width": 1000}, headers=headers)
+    assert small.status_code == large.status_code == 200 and len(large.content) > len(small.content)
+    assert fitz.Pixmap(large.content).width == 1000
+    assert client.get(thumb, params={"file": index.index("IMG_0042.png")}, headers=headers).status_code == 200
+    assert client.get(thumb, params={"file": index.index("notes.md")}, headers=headers).json()["detail"] == "这种文件没有页面预览"
+    assert client.get(thumb, params={"file": 0, "width": 5000}, headers=headers).status_code == 422
+
+
+def test_meaningless_file_names_are_grouped_by_page_one_title(client):
+    headers = auth_header(register(client, "scan-user").json()["token"])
+
+    def handout(title):
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 60), "MATH 2010 handout", fontsize=9)  # small running header first
+        page.insert_text((72, 130), title, fontsize=24)
+        return doc.tobytes()
+
+    files = [("files", ("scan_0001.pdf", handout("1.2 Linear Combinations"), "application/pdf")),
+             ("files", ("x7f3k2.pdf", handout("Chapter 1 Vectors"), "application/pdf")),
+             ("files", ("LA_2.1.pdf", handout("Matrices"), "application/pdf"))]
+    proposal = client.post("/api/import/analyze", files=files, headers=headers).json()
+    assert [(c["number"], c["files"]) for c in proposal["chapters"]] == [(1, ["x7f3k2.pdf", "scan_0001.pdf"]), (2, ["LA_2.1.pdf"])]

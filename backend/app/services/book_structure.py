@@ -304,7 +304,8 @@ _FILE_PATTERNS = [
 
 def number_from_name(name: str) -> tuple[int | None, int, str]:
     """'LA_4.2.pdf' → (4, 2, 'chapter'); '第5讲_xx.pdf' → (5, 0, 'lecture'); no number → (None, 0, ...)."""
-    stem = _DATE.sub(" ", Path(name).stem)
+    # Only drop a real extension: for a heading like "1.2 Linear Combinations", Path().stem would give "1".
+    stem = _DATE.sub(" ", Path(name).stem if re.search(r"\.[A-Za-z][A-Za-z0-9]{0,4}$", name) else name)
     for pattern, label in _FILE_PATTERNS:
         match = pattern.search(stem)
         if match:
@@ -327,6 +328,35 @@ def _first_heading(path: Path) -> str:
         return ""
 
 
+def first_page_title(path: Path) -> str:
+    """What page 1 says it is: the largest text in its top half (to recognise files with meaningless names)."""
+    if path.suffix.lower() != ".pdf":
+        return ""
+    try:
+        with fitz.open(path) as doc:
+            if not len(doc):
+                return ""
+            page = doc[0]
+            clip = fitz.Rect(0, 0, page.rect.width, page.rect.height * 0.6)
+            lines: list[tuple[float, float, str]] = []
+            for block in page.get_text("dict", clip=clip).get("blocks", []):
+                for line in block.get("lines", []):
+                    spans = [span for span in line.get("spans", []) if span.get("text", "").strip()]
+                    if not spans:
+                        continue
+                    text = re.sub(r"\s+", " ", "".join(span["text"] for span in spans)).strip()
+                    if len(text) >= 2:
+                        lines.append((max(span["size"] for span in spans), line["bbox"][1], text))
+            if not lines:
+                return ""
+            biggest = max(size for size, _, _ in lines)
+            # Titles often wrap: join the lines set in the largest size, top to bottom.
+            title = " ".join(text for size, _, text in sorted(lines, key=lambda item: item[1]) if size >= biggest - 0.5)
+            return title[:120]
+    except Exception:
+        return ""
+
+
 def pdf_pages(path: Path) -> int | None:
     if path.suffix.lower() != ".pdf":
         return None
@@ -343,10 +373,13 @@ def analyze_files(files: list[tuple[str, Path]]) -> list[Chapter]:
     for index, (name, path) in enumerate(files):
         chapter, section, label = number_from_name(name)
         if chapter is None and path.suffix.lower() == ".pdf":
-            heading = _first_heading(path)
-            chapter, section, label = number_from_name(heading)
-            if chapter is None:
-                chapter, _, label = parse_chapter_title(heading, allow_bare=False)
+            # Meaningless name: use what page 1 says — its title (largest text), then its first line.
+            for heading in dict.fromkeys(filter(None, (first_page_title(path), _first_heading(path)))):
+                chapter, section, label = number_from_name(heading)
+                if chapter is None:
+                    chapter, _, label = parse_chapter_title(heading, allow_bare=False)
+                if chapter is not None:
+                    break
         keyed.append((chapter, section, label, index, name))
 
     chapters: dict[int, Chapter] = {}

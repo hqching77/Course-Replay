@@ -120,12 +120,14 @@ export async function protectedBlobUrl(path: string, signal?: AbortSignal) {
 
 export interface ImportPart { file_index: number; start: number; end: number }
 export interface ImportChapter { key: string; number: number | null; label: 'chapter' | 'lecture'; title: string; parts: ImportPart[]; pages: number; files: string[]; excluded: string | null }
+/** title: the largest text on page 1; preview: pages can be shown (PDFs and images). */
+export interface ImportFileMeta { name: string; pages: number | null; size: number; title: string; preview: boolean }
 export interface ImportProposal {
   import_id: string
   mode: 'book' | 'files'
   method: 'bookmarks' | 'contents' | 'headings' | 'filenames' | 'manual'
   total_pages: number
-  files: { name: string; pages: number | null; size: number }[]
+  files: ImportFileMeta[]
   chapters: ImportChapter[]
 }
 export interface AppliedImport { chapters: { title: string; uploads: { id: string; filename: string; size: number; pages: number | null }[] }[] }
@@ -156,7 +158,7 @@ export const importApi = {
   },
   apply: (importId: string, chapters: { title: string; parts: ImportPart[] }[]) => apiFetch<AppliedImport>(`/api/import/${importId}/apply`, { method: 'POST', json: { chapters } }),
   cancel: (importId: string) => apiFetch<void>(`/api/import/${importId}`, { method: 'DELETE' }),
-  thumbPath: (importId: string, file: number, page: number) => `/api/import/${importId}/thumb?file=${file}&page=${page}`,
+  thumbPath: (importId: string, file: number, page: number, width = 260) => `/api/import/${importId}/thumb?file=${file}&page=${page}&width=${width}`,
 }
 
 export async function openProtectedFile(path: string) {
