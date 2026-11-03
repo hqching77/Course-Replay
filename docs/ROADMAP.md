@@ -130,9 +130,10 @@ The chapter structure also gives 考前冲刺 its scope ("期中范围：第 1�
 - Real linear algebra files.
 - A 600-page document for speed.
 
-### Decisions still open
-- One 小节 per chapter with 1.1–1.3 inside (default), or one 小节 per section?
-- Show textbook chapters in their own group on the course page (课本章节), separate from the lecture sections (第 N 讲 · date)? Suggested: yes.
+### Decisions (2026-11-03)
+- **Bulk import is always by chapter:** 1.1, 1.2 and 1.3 go into one 小节 "第 1 章", the same for the chapters of a single textbook PDF. There is no per-section option.
+- **No separate textbook group.** Normal use is unchanged: create a course, add 小节 and upload files yourself. Bulk import simply adds one 小节 per chapter to the course.
+- **Two entry points:** "批量导入" on a course page (adds chapters to that course), and an option when creating a course to import a textbook or a folder of files, so the new course starts organised by chapter.
 
 ---
 
