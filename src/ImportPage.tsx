@@ -257,13 +257,13 @@ export function ImportPage({ courses, setCourses, notify }: { courses: Course[];
 
   return <div className="page import-page">
     <div className="back-row"><Link to={`/courses/${course.id}`}><ArrowLeft size={16} />{course.title}</Link><span>/</span><span>{t('导入课本 / 批量导入')}</span></div>
-    <PageHeader title={t('导入课本 / 批量导入')} subtitle={t('一本课本 PDF 按书签、目录或章节标题自动分章；一批文件（1.1、1.2…）按文件名分章。拆分前先给你检查，确认后才会创建小节。')} />
+    <PageHeader title={t('导入课本 / 批量导入')} subtitle={t('把整本课本或一批讲义按章分成小节。')} />
     {error && <div className="api-error"><X size={16} /><div><strong>{t('出错了')}</strong><p>{error}</p></div></div>}
 
     {(step === 'pick' || step === 'analyzing') && <button className="drop-zone import-drop" disabled={step === 'analyzing'} onClick={() => input.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); void analyze(event.dataTransfer.files) }}>
       {step === 'analyzing'
-        ? <><span><RefreshCw className="spin-icon" size={22} /></span><strong>{t('正在读取章节结构…')}</strong><small>{t('不用 AI，600 页的课本也只要几秒')}</small></>
-        : <><span><UploadCloud size={23} /></span><strong>{t('拖入一本课本 PDF，或一批讲义文件')}</strong><small>{t('例如「线性代数.pdf」，或 1.1.pdf、1.2.pdf … 4.2.pdf')}</small></>}
+        ? <><span><RefreshCw className="spin-icon" size={22} /></span><strong>{t('正在读取章节结构…')}</strong><small>{t('通常几秒就好')}</small></>
+        : <><span><UploadCloud size={23} /></span><strong>{t('拖入一本课本 PDF，或一批讲义文件')}</strong><small>{t('可以是整本课本，也可以是按节分开的多个文件')}</small></>}
     </button>}
     <input ref={input} type="file" multiple hidden accept={ACCEPT} onChange={(event) => { void analyze(event.target.files); event.target.value = '' }} />
 

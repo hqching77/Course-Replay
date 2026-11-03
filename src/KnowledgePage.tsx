@@ -49,15 +49,15 @@ export function KnowledgePage({ courses, setCourses }: Props) {
   const groups = courses.map((course) => ({ course, items: shown.filter((entry) => entry.courseId === course.id) })).filter((group) => group.items.length)
 
   return <div className="page knowledge-page">
-    <PageHeader title={t('知识档案')} subtitle={t('你在所有课程里学过、答过的知识点。AI 讲师、上课时的助教、针对练习和生成笔记都会参考这份档案：讲新内容时联系你已经会的，薄弱的地方多讲一步。')} />
+    <PageHeader title={t('知识档案')} subtitle={t('你在所有课程里学过、答过的知识点。')} />
     <div className="overview-strip knowledge-overview">
       {(['mastered', 'shaky', 'weak', 'studied'] as Level[]).map((level) => <div key={level}><span>{levelLabel(level)}</span><strong>{counts[level] + (level === 'mastered' ? counts.known : 0)}</strong><small>{level === 'mastered' ? t('含答对过 {n} 个', { n: counts.known }) : level === 'shaky' ? t('答对过也答错过') : level === 'weak' ? t('答错了或你说还不会') : t('读过笔记，还没做过题')}</small></div>)}
     </div>
 
-    {!entries.length && <div className="empty-hint">{t('还没有记录。在课堂重放里读笔记、做自测题，或者用「考前冲刺」诊断一下，这里就会出现你的知识点。')}</div>}
+    {!entries.length && <div className="empty-hint">{t('还没有记录。读笔记、做题之后会出现在这里。')}</div>}
 
     {links.length > 0 && <section className="section-block">
-      <div className="section-heading"><div><h2>{t('跨课程关联')}</h2><p>{t('不同课程里讲的可能是同一件事（按标题里相同的词找到）。AI 讲到其中一个时，会联系你在另一门课里学过的。')}</p></div></div>
+      <div className="section-heading"><div><h2>{t('跨课程关联')}</h2><p>{t('不同课程里相关的知识点。')}</p></div></div>
       <div className="panel knowledge-links">{links.map(({ a, b, term }) => <div className="knowledge-link" key={`${a.key}|${b.key}`}>
         <em>{term}</em>
         <Link to={noteLink(a)} state={{ focus: a.nodeId }}><span>《{a.courseTitle}》</span>{a.title}<i className={`knowledge-level ${a.level}`}>{levelLabel(a.level)}</i></Link>
@@ -82,9 +82,8 @@ export function KnowledgePage({ courses, setCourses }: Props) {
     </section>}
 
     {entries.length > 0 && <section className="section-block">
-      <button className="text-button" onClick={() => setShowPrompt((value) => !value)}>{t('AI 实际读到的档案')} <ChevronDown size={13} className={showPrompt ? 'flip' : ''} /></button>
+      <button className="text-button" onClick={() => setShowPrompt((value) => !value)}>{t('AI 看到的档案')} <ChevronDown size={13} className={showPrompt ? 'flip' : ''} /></button>
       {showPrompt && <pre className="knowledge-prompt">{learnerMemory(undefined, '', courses)}</pre>}
-      {showPrompt && <p className="field-hint">{t('这是不在某门课里时的版本；在某门课里提问时，那门课会写得更详细，并列出其他课程里和眼前内容相关的知识点。只在你提问、练习或生成笔记时随请求发送，服务器不会另外保存。')}</p>}
     </section>}
   </div>
 }

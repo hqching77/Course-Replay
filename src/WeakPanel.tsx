@@ -51,8 +51,8 @@ export function WeakPanel({ course, setCourses }: { course: Course; setCourses: 
   }
 
   return <section className="section-block weak-block">
-    <div className="section-heading"><div><h2><Target size={16} /> {t('薄弱点')}</h2><p>{t('每道批改过的题都会记在这里（自测题、考前诊断、针对练习）；之后连续答对两次才算掌握。')}</p></div></div>
-    {active.length ? <div className="weak-list">{active.map(row)}</div> : <div className="empty-hint">{list.length ? t('目前没有薄弱点，继续保持。') : t('还没有记录。在课堂重放里做自测题，或用「考前冲刺」诊断一下，答错的地方会出现在这里。')}</div>}
+    <div className="section-heading"><div><h2><Target size={16} /> {t('薄弱点')}</h2><p>{t('答错的知识点记在这里，连续答对两次就算掌握。')}</p></div></div>
+    {active.length ? <div className="weak-list">{active.map(row)}</div> : <div className="empty-hint">{list.length ? t('目前没有薄弱点，继续保持。') : t('还没有薄弱点记录。')}</div>}
     {mastered.length > 0 && <button className="text-button weak-mastered-toggle" onClick={() => setShowMastered((value) => !value)}>{t('已掌握 {n} 个', { n: mastered.length })} <ChevronDown size={13} className={showMastered ? 'flip' : ''} /></button>}
     {showMastered && <div className="weak-list mastered">{mastered.map(row)}</div>}
     {practice && <PracticeDialog topic={practice.topic} onClose={() => setPractice(null)} onResult={(result, question) => updateCourse(setCourses, course.id, (current) => recordAnswer(current, {

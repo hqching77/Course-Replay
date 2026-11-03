@@ -24,7 +24,7 @@ export function SemesterForm({ onDone }: { onDone?: () => void }) {
     </div>
     <label>{t('第 1 周的周一')}<input type="date" required value={draft.start} onChange={(event) => setDraft({ ...draft, start: event.target.value })} /></label>
     <label>{t('学期名称')}<input value={draft.name || ''} maxLength={40} placeholder={semesterName({ ...draft, name: '' })} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-    <small className="semester-form-hint">{t('不同学校周数不同：填「现在是第几周」最快，第 1 周的日期会自动算出来。')}</small>
+    <small className="semester-form-hint">{t('填现在是第几周，第 1 周的日期会自动算出。')}</small>
     <div className="semester-actions">
       {isCustomSemester() && <button type="button" className="text-button" onClick={() => { saveSemester(null); setDraft({ ...defaultSemester(), name: '' }); onDone?.() }}>{t('恢复默认')}</button>}
       <button type="submit" className="button primary compact">{t('保存')}</button>

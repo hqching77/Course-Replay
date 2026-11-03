@@ -34,7 +34,7 @@ function ProviderFields({ presets, value, onChange }: {
       <label>{t('模型')}<input value={value.model} onChange={(event) => onChange({ model: event.target.value })} placeholder={preset?.model || t('在服务商控制台复制模型名')} spellCheck={false} /></label>
     </div>
     <label>API Key<div className="secret-field"><input type={showKey ? 'text' : 'password'} value={value.apiKey} onChange={(event) => onChange({ apiKey: event.target.value })} placeholder="sk-…" autoComplete="off" spellCheck={false} /><button type="button" aria-label={showKey ? t('隐藏') : t('显示')} onClick={() => setShowKey((shown) => !shown)}>{showKey ? <EyeOff size={14} /> : <Eye size={14} />}</button></div></label>
-    <p className="field-hint">{t('Key 只保存在这个浏览器（localStorage），调用 AI 时经你的服务器转发，不会存进数据库。')}</p>
+    <p className="field-hint">{t('Key 只保存在这个浏览器里，不会存进数据库。')}</p>
   </div>
 }
 

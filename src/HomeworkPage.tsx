@@ -1,4 +1,4 @@
-import { ArrowLeft, BookOpen, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert, Eye, FileUp, Flag, Lightbulb, ListChecks, MessageCircleQuestion, PenLine, Plus, RefreshCw, Smartphone, Sparkles, Trash2, X } from 'lucide-react'
+import { ArrowLeft, BookOpen, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert, Eye, FileUp, Flag, Lightbulb, ListChecks, PenLine, Plus, RefreshCw, Smartphone, Sparkles, Trash2, X } from 'lucide-react'
 import QRCode from 'qrcode'
 import { Dispatch, ReactNode, SetStateAction, useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
@@ -117,7 +117,7 @@ function UploadButtons({ part, account, onDone, notify, disabled }: { part: 'que
       setBusy('')
     }
   }
-  if (!account) return <p className="field-hint">{t('登录后可以拍照或上传图片 / PDF；现在可以直接打字。')}</p>
+  if (!account) return <p className="field-hint">{t('登录后可以拍照或上传图片。')}</p>
   return <div className="hw-upload">
     <button type="button" className="button secondary compact" disabled={disabled || Boolean(busy)} onClick={() => camera.current?.click()}><Camera size={15} />{t('拍照')}</button>
     <button type="button" className="button secondary compact" disabled={disabled || Boolean(busy)} onClick={() => picker.current?.click()}><FileUp size={15} />{t('上传图片 / PDF')}</button>
@@ -148,9 +148,9 @@ function QrPanel({ url }: { url: string }) {
     {image ? <img src={image} alt={t('打开这道题的二维码')} /> : <span className="mini-spinner" />}
     <div>
       <strong>{t('用手机或平板交答案')}</strong>
-      <p>{t('扫码打开这道题（登录同一个账号），点「拍照」拍下你的解答。上传后这里几秒内就会出现。')}</p>
+      <p>{t('用手机扫码打开这道题（同一个账号），拍照上传后会自动出现在这里。')}</p>
       <code>{url}</code>
-      {local && <p className="hw-qr-warning">{t('现在用的是本机地址（localhost），手机打不开。部署后，或用电脑的局域网地址打开本页，再扫码。')}</p>}
+      {local && <p className="hw-qr-warning">{t('手机打不开 localhost 地址：请用电脑的局域网地址或线上地址打开本页，再扫码。')}</p>}
     </div>
   </div>
 }
@@ -303,13 +303,12 @@ function ProblemView({ course, item, store, setCourses, notify, account }: { cou
       <section className="panel hw-card">
         <div className="hw-card-head"><h3>{t('2 · 我的答案')}</h3>{account && <button type="button" className="button ghost compact hw-qr-toggle" onClick={() => setShowQr((value) => !value)}><Smartphone size={14} />{showQr ? t('收起二维码') : t('用手机 / 平板交答案')}</button>}</div>
         {showQr && <QrPanel url={url} />}
-        {draftBox(t('我的答案'), t('写下你的解答（公式可以用 LaTeX），或者点「拍照」拍下手写的解答；AI 会抄成文字，你可以检查修改。'))}
+        {draftBox(t('我的答案'), t('写下你的解答，或拍照上传'))}
         <div className="hw-actions"><button className="button primary" disabled={draftEmpty || Boolean(busy)} onClick={() => void submitCheck()}><Check size={16} />{t('批改我的答案')}</button></div>
-        <p className="field-hint">{t('只告诉你对不对、第一处错在哪、正确答案是什么；完整步骤要你点了才给。')}</p>
       </section>
       <section className="panel hw-card hw-guide-card">
         <h3>{t('不会做？')}</h3>
-        <p>{t('AI 一次只给一条提示：先告诉你用哪个概念，再带你写第一步，之后看你写的再往下。不会直接给答案。')}</p>
+        <p>{t('一步一步来，每次一条提示。')}</p>
         <button className="button secondary" disabled={Boolean(busy)} onClick={() => void askHint()}><Sparkles size={16} />{t('带我起步')}</button>
       </section>
     </div>
@@ -318,7 +317,7 @@ function ProblemView({ course, item, store, setCourses, notify, account }: { cou
   } else if (!finished && guiding) {
     composer = <section className="panel hw-card">
       <h3>{t('写下你这一步')}</h3>
-      {draftBox(t('你这一步'), t('照着提示写下一步（可以拍照）。写完提交，AI 告诉你对不对、下一步做什么。'))}
+      {draftBox(t('你这一步'), t('写下这一步，或拍照上传'))}
       <div className="hw-actions">
         <button className="button primary" disabled={draftEmpty || Boolean(busy)} onClick={() => void submitAttempt()}><Check size={16} />{t('提交这一步')}</button>
         <button className="button secondary" disabled={Boolean(busy)} onClick={() => void askHint()}><Lightbulb size={16} />{t('再给一点提示')}</button>
@@ -331,7 +330,7 @@ function ProblemView({ course, item, store, setCourses, notify, account }: { cou
   } else if (!finished) {
     composer = <section className="panel hw-card">
       <h3>{t('改一改，再交一次')}</h3>
-      {draftBox(t('改过的答案'), t('按上面的提示改正，再交一次（可以拍照）。'))}
+      {draftBox(t('改过的答案'), t('改好后再交一次'))}
       <div className="hw-actions">
         <button className="button primary" disabled={draftEmpty || Boolean(busy)} onClick={() => void submitCheck()}><Check size={16} />{t('再交一次')}</button>
         <button className="button secondary" disabled={Boolean(busy)} onClick={() => void askHint()}><Lightbulb size={16} />{t('给我提示')}</button>
@@ -388,10 +387,9 @@ function NewProblem({ course, store, notify, account }: { course: Course; store:
   }
   return <section className="panel hw-card hw-new">
     <h3>{t('1 · 题目')}</h3>
-    <p className="field-hint">{t('先把题目交上来；答案可以现在写，也可以之后在手机或平板上拍照交（保存后扫码）。')}</p>
     <UploadButtons part="question" account={account} notify={notify} onDone={(added, read) => { setImages((current) => [...current, ...added]); setText((current) => [current.trim(), read].filter(Boolean).join('\n\n')) }} />
     <ImageStrip images={images} onRemove={(id) => setImages((current) => current.filter((image) => image.id !== id))} />
-    <TextWithPreview label={t('题目')} value={text} onChange={setText} rows={8} placeholder={t('把题目打在这里（公式可以用 LaTeX，如 $x^2$），或者拍照 / 上传图片、PDF，AI 会把题目抄成文字。')} />
+    <TextWithPreview label={t('题目')} value={text} onChange={setText} rows={8} placeholder={t('输入题目，或拍照 / 上传图片、PDF')} />
     <div className="hw-actions"><button className="button primary" disabled={(!text.trim() && !images.length) || saving} onClick={() => void save()}>{saving ? <RefreshCw className="spin-icon" size={16} /> : <Check size={16} />}{t('保存题目')}</button></div>
   </section>
 }
@@ -413,7 +411,7 @@ export function HomeworkPage({ courses, setCourses, notify, account }: Props) {
 
   return <div className="page homework-page">
     <div className="back-row"><Link to={`/courses/${course.id}`}><ArrowLeft size={16} />{course.title}</Link><span>/</span><span>{t('题目答疑')}</span></div>
-    <PageHeader title={t('题目答疑')} subtitle={t('交题目和你的答案：AI 判对错、指出第一处错误；不会做就一步一步带你起步。做完写一张总结，记进薄弱点和知识档案。')}
+    <PageHeader title={t('题目答疑')} subtitle={t('交作业题：批改你的答案，或者一步步带你做。')}
       actions={<>{courses.length > 1 && <select className="hw-course-select" aria-label={t('选择课程')} value={course.id} onChange={(event) => navigate(`/courses/${event.target.value}/homework`)}>{courses.map((value) => <option key={value.id} value={value.id}>{value.title}</option>)}</select>}
         <Link className="button primary" to={`/courses/${course.id}/homework/new`}><Plus size={17} />{t('新题目')}</Link></>} />
     {store.loadError && <div className="api-error"><X size={16} /><div><strong>{t('读取题目失败')}</strong><p>{store.loadError}</p></div></div>}
@@ -439,6 +437,5 @@ export function HomeworkPage({ courses, setCourses, notify, account }: Props) {
         {itemId && <Link className="text-button homework-back" to={`/courses/${course.id}/homework`}><ArrowLeft size={14} />{t('全部题目')}</Link>}
       </main>
     </div>
-    <div className="homework-help"><MessageCircleQuestion size={14} />{t('做完点「结束这道题」：AI 总结关键和方法，你卡住的地方会记进薄弱点，之后的练习和考前冲刺都会参考。')}</div>
   </div>
 }

@@ -47,7 +47,7 @@ function Setup({ course, plan, onSave, onCancel }: { course: Course; plan?: Exam
 function Elsewhere({ related }: { related?: Related }) {
   if (!related) return null
   const { entry } = related
-  return <span className="elsewhere" title={t('其他课程里的同类知识点（按标题里相同的词「{term}」找到）', { term: related.term })}><ArrowLeftRight size={10} />{t('《{course}》{title} · {level}', { course: entry.courseTitle, title: entry.title, level: knowledgeLabel(entry.level) })}</span>
+  return <span className="elsewhere" title={t('其他课程里的相关知识点', { term: related.term })}><ArrowLeftRight size={10} />{t('《{course}》{title} · {level}', { course: entry.courseTitle, title: entry.title, level: knowledgeLabel(entry.level) })}</span>
 }
 
 function Diagnosis({ course, plan, setCourses, notify, related }: { course: Course; plan: ExamPlan; related: (title: string) => Related | undefined } & Omit<Props, 'courses'>) {
@@ -139,7 +139,7 @@ function Diagnosis({ course, plan, setCourses, notify, related }: { course: Cour
   }
 
   return <div className="diagnosis">
-    <p className="field-hint">{t('每个知识点 2 道选择题：都对 = 已掌握（计划里跳过），对一道 = 不太稳，都错 = 不会。会的就点「我很熟，跳过」，不会的直接点「我不会这个」，省时间。')} {t('已诊断 {done} / {total} 个知识点', { done: diagnosed, total: plan.topics.length })} {t('知识档案里已有结论的（已掌握 / 薄弱）创建计划时会直接带进来。')}</p>
+    <p className="field-hint">{t('每个知识点几道选择题，会的可以直接跳过。')} {t('已诊断 {done} / {total} 个知识点', { done: diagnosed, total: plan.topics.length })}</p>
     {sections.map((section) => {
       const topics = topicsOf(section.id)
       const pending = topics.filter((topic) => !topic.level).length
@@ -164,13 +164,13 @@ function PlanView({ course, plan, onPractice, related }: { course: Course; plan:
     </div>
   </div>
   return <div className="plan">
-    <p className="field-hint">{t('顺序：不会 → 不太稳 → 其它；老师强调过、往年考过、薄弱点会排得更前。每个知识点练对 2 题就算掌握，计划会自动重新排。')}</p>
+    <p className="field-hint">{t('先复习不会的，再复习不太稳的。')}</p>
     {result.days.map((day, index) => <section className={`panel plan-day ${index === 0 ? 'today' : ''}`} key={day.date}>
       <div className="plan-day-head"><strong>{day.label}</strong><span>{day.review ? t('考前一天') : day.minutes ? t('约 {n} 分钟', { n: day.minutes }) : ''}</span></div>
       {day.review ? <p className="plan-review">{t('不学新内容：把「薄弱点」里剩下的过一遍，再看一遍老师强调过的地方。')}</p>
         : day.blocks.length ? day.blocks.map(block) : <p className="plan-review">{t('这天没有安排，可以复习错题或休息。')}</p>}
     </section>)}
-    {result.overflow.length > 0 && <section className="panel plan-overflow"><div className="plan-day-head"><strong><CircleAlert size={14} /> {t('时间不够，这些排不下')}</strong><span>{t('{n} 个知识点', { n: result.overflow.length })}</span></div>{result.overflow.map(block)}<p className="field-hint">{t('点「修改范围和时间」增加每天的复习时间；或者先诊断，会的知识点会被跳过。')}</p></section>}
+    {result.overflow.length > 0 && <section className="panel plan-overflow"><div className="plan-day-head"><strong><CircleAlert size={14} /> {t('时间不够，这些排不下')}</strong><span>{t('{n} 个知识点', { n: result.overflow.length })}</span></div>{result.overflow.map(block)}<p className="field-hint">{t('可以增加每天的复习时间，或者先诊断，跳过会的知识点。')}</p></section>}
     {result.mastered.length > 0 && <button className="text-button" onClick={() => setShowMastered((value) => !value)}>{t('已掌握、跳过的 {n} 个知识点', { n: result.mastered.length })}</button>}
     {showMastered && <div className="diagnosis-topics">{result.mastered.map((info) => <span key={info.topic.key} className="level-chip known">{info.topic.title}</span>)}</div>}
   </div>
@@ -209,7 +209,7 @@ function PastPapers({ course, plan, setCourses, notify }: { course: Course; plan
   }
   const ranked = [...byTopic.entries()].sort((a, b) => (a[0] === '__none' ? 1 : b[0] === '__none' ? -1 : b[1].length - a[1].length))
   return <div className="past-papers">
-    <p className="field-hint">{t('上传往年试卷（PDF 或照片）。AI 把每道题对应到知识点：考得多的知识点在计划里排得更前，针对练习也会照着这些题型出。')}</p>
+    <p className="field-hint">{t('上传往年试卷（PDF 或照片），看看哪些知识点考得多。')}</p>
     <button className="drop-zone" disabled={Boolean(busy)} onClick={() => input.current?.click()}><span>{busy ? <RefreshCw className="spin-icon" size={20} /> : <FileUp size={22} />}</span><strong>{busy ? t('正在读《{name}》…', { name: busy }) : t('上传往年试卷')}</strong><small>{(plan.pastPapers || []).length ? t('已读：{list}', { list: (plan.pastPapers || []).join('、') }) : t('还没有上传')}</small></button>
     <input ref={input} type="file" multiple hidden accept=".pdf,.png,.jpg,.jpeg,.webp,.docx,.doc" onChange={(event) => { void upload(event.target.files); event.target.value = '' }} />
     {ranked.map(([key, questions]) => <section className="panel past-topic" key={key}>
@@ -251,7 +251,7 @@ export function ExamPage({ courses, setCourses, notify }: Props) {
 
   const header = <><div className="back-row"><Link to={`/courses/${course.id}`}><ArrowLeft size={16} />{course.title}</Link><span>/</span><span>{t('考前冲刺')}</span></div></>
   if (!plan || editing) return <div className="page exam-page">{header}
-    <PageHeader title={t('考前冲刺')} subtitle={t('先用几道题诊断哪些会、哪些不会，再按剩下的天数排出每天要复习什么；会的直接跳过。')} />
+    <PageHeader title={t('考前冲刺')} subtitle={t('先诊断，再按天排复习计划。')} />
     <Setup course={course} plan={plan} onSave={save} onCancel={plan ? () => setEditing(false) : undefined} />
   </div>
 

@@ -193,7 +193,7 @@ export function LiveClass({ courses, setCourses, notify }: Props) {
       </div>
     </div>
     <input ref={fileRef} type="file" multiple hidden accept={ACCEPT} onChange={(event) => upload(event.target.files)} />
-    {isThis && live.state.error && <div className="live-banner"><CircleHelp size={16} /><p>{live.state.engine === 'browser' ? live.state.error : t('语音识别暂时不可用：{error}。录音会先保存，后台自动重试，恢复后转写会自己补上；这条提示只出现一次。', { error: live.state.error.replace(/[。.]$/, '') })}</p><Link to="/settings"><Settings size={13} />{t('去设置')}</Link><button aria-label={t('关闭')} onClick={live.dismissError}><X size={14} /></button></div>}
+    {isThis && live.state.error && <div className="live-banner"><CircleHelp size={16} /><p>{live.state.engine === 'browser' ? live.state.error : t('语音识别暂时不可用：{error}。录音已保存，恢复后会自动补上转写。', { error: live.state.error.replace(/[。.]$/, '') })}</p><Link to="/settings"><Settings size={13} />{t('去设置')}</Link><button aria-label={t('关闭')} onClick={live.dismissError}><X size={14} /></button></div>}
     <div className="live-tabs" role="tablist">
       <button role="tab" aria-selected={tab === 'transcript'} className={tab === 'transcript' ? 'active' : ''} onClick={() => setTab('transcript')}>{t('实时转写')}</button>
       <button role="tab" aria-selected={tab === 'questions'} className={tab === 'questions' ? 'active' : ''} onClick={() => setTab('questions')}>{t('提问')} {questions.length > 0 && <em>{questions.length}</em>}</button>
