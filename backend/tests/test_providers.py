@@ -232,3 +232,41 @@ def test_health_reports_speech_and_database(client):
     assert body["stt_model"] == "FunAudioLLM/SenseVoiceSmall"
     assert body["stt_configured"] is False
     assert body["database"] in {"sqlite", "postgresql"}
+
+
+def test_env_edits_apply_without_restart(tmp_path, monkeypatch):
+    import os
+
+    import app.config as config
+
+    env = tmp_path / ".env"
+    env.write_text("STT_API_KEY=first-key\n", encoding="utf-8")
+    monkeypatch.setattr(config, "_ENV_FILES", (env,))
+    monkeypatch.setattr(config, "_loaded", None)
+    monkeypatch.delenv("STT_API_KEY", raising=False)
+    assert config.get_settings().stt_api_key == "first-key"
+    assert config.get_settings() is config.get_settings()  # cached while the file is unchanged
+
+    env.write_text("STT_API_KEY=second-key\nSTT_BASE_URL=https://api.siliconflow.com/v1\n", encoding="utf-8")
+    stat = env.stat()
+    os.utime(env, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+    reloaded = config.get_settings()
+    assert reloaded.stt_api_key == "second-key" and reloaded.stt_base_url == "https://api.siliconflow.com/v1"
+
+
+def test_stt_check_makes_a_real_call_without_a_microphone(client, stt_calls, headers, monkeypatch):
+    unconfigured = client.post("/api/stt/check", headers=headers).json()
+    assert unconfigured["ok"] is False and "还没有配置语音识别" in unconfigured["error"] and stt_calls == []
+
+    monkeypatch.setattr(get_settings(), "stt_api_key", "sf-key")
+    ok = client.post("/api/stt/check", headers=headers).json()
+    assert ok["ok"] is True and ok["model"] == "FunAudioLLM/SenseVoiceSmall" and ok["latency_ms"] == 42
+    assert stt_calls[0]["filename"] == "check.wav" and stt_calls[0]["bytes"] > 30000  # 1 s of 16 kHz audio
+
+
+def test_stt_errors_explain_the_usual_fix():
+    from app.providers import stt_error_hint
+
+    assert "api.siliconflow.com" in stt_error_hint(401, "https://api.siliconflow.cn/v1")
+    assert "实名" in stt_error_hint(403, "https://api.siliconflow.cn/v1")
+    assert "FunAudioLLM/SenseVoiceSmall" in stt_error_hint(404, "https://api.siliconflow.cn/v1")

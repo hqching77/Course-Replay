@@ -43,7 +43,7 @@ import {
 } from 'lucide-react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Course, CourseAnalysis, KnowledgeNode, KnowledgeTier, Section, TIER_META, createSection, deriveKnowledgeMap, normalizeMarkdown } from './data'
-import { apiFetch, authApi, openProtectedFile } from './api'
+import { ApiError, apiFetch, authApi, openProtectedFile } from './api'
 import { AccountView, syncLabel } from './account'
 import { AuthScreen, SplashScreen } from './AuthScreen'
 import { addMaterialFiles, autoSectionTitle, buildInputs, forgetStagedFile, startSectionBuild, titleFromAnalysis } from './build'
@@ -599,11 +599,23 @@ function SectionDetail({ courses, setCourses, notify }: PageProps) {
           await new Promise((resolve) => window.setTimeout(resolve, 900))
         } catch (error) {
           if (!active || (error instanceof DOMException && error.name === 'AbortError')) return
-          return failJob(error instanceof Error ? error.message : t('材料处理失败'))
+          // The build keeps running on the server: a network blip or a busy server is not a failed
+          // build. Keep checking quietly (with backoff) and give up only after 10 minutes of errors.
+          const status = error instanceof ApiError ? error.status : 0
+          const transient = status === 0 || status === 429 || status >= 500
+          troubleSince ||= Date.now()
+          if (!transient || Date.now() - troubleSince > 10 * 60_000) return failJob(error instanceof Error ? error.message : t('材料处理失败'))
+          troubles++
+          await new Promise((resolve) => window.setTimeout(resolve, Math.min(15000, 1000 * 2 ** Math.min(troubles, 4))))
+          continue
         }
+        troubles = 0
+        troubleSince = 0
       }
     }
 
+    let troubles = 0
+    let troubleSince = 0
     void poll()
     return () => {
       active = false

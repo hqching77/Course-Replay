@@ -216,6 +216,15 @@ class AICheckResponse(BaseModel):
     error: str | None = None
 
 
+class SttCheckResponse(BaseModel):
+    ok: bool
+    source: str  # "server" | "custom"
+    base_url: str
+    model: str
+    latency_ms: int | None = None
+    error: str | None = None
+
+
 class TranscribeResponse(BaseModel):
     text: str
     model: str

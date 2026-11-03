@@ -66,6 +66,7 @@ export function LiveClass({ courses, setCourses, notify }: Props) {
   const segments = section?.transcript || []
   const questions = section?.classQuestions || []
   const pending = isThis ? live.state.pending : []
+  const waiting = pending.filter((chunk) => chunk.status === 'queued').sort((a, b) => a.startedAt - b.startedAt)
 
   useEffect(() => {
     const feed = feedRef.current
@@ -164,7 +165,9 @@ export function LiveClass({ courses, setCourses, notify }: Props) {
   const feed: FeedItem[] = [
     ...segments.map((segment) => ({ at: segment.startedAt, key: segment.id, node: <div className="transcript-line" key={segment.id}><time>{formatClock(segment.startedAt)}</time><p>{segment.text}</p></div> })),
     ...questions.map((item, index) => ({ at: item.askedAt, key: item.id, node: <button className="transcript-question" key={item.id} onClick={() => { setTab('questions'); document.getElementById(`qa-${item.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }}><CircleHelp size={13} /><span>{t('你在这里提问 #{n}：{question}', { n: index + 1, question: item.question })}</span></button> })),
-    ...pending.map((chunk) => ({ at: chunk.startedAt, key: chunk.id, node: <div className={`transcript-line pending ${chunk.status}`} key={chunk.id}><time>{formatClock(chunk.startedAt)}</time>{chunk.status === 'transcribing' ? <p><span className="mini-spinner" />{t('识别中…')}</p> : <p>{t('这段没识别成功：{error}', { error: chunk.error || '' })}<button onClick={() => live.retry(chunk.id)}><RefreshCw size={11} />{t('重试')}</button></p>}</div> })),
+    ...pending.filter((chunk) => chunk.status === 'transcribing').map((chunk) => ({ at: chunk.startedAt, key: chunk.id, node: <div className="transcript-line pending transcribing" key={chunk.id}><time>{formatClock(chunk.startedAt)}</time><p><span className="mini-spinner" />{t('识别中…')}</p></div> })),
+    // Recordings waiting for recognition to work again: one quiet line, not one error per chunk.
+    ...(waiting.length ? [{ at: waiting[0].startedAt, key: 'waiting', node: <div className="transcript-line pending queued" key="waiting"><time>{formatClock(waiting[0].startedAt)}</time><p>{t('{n} 段录音已保存，等语音识别恢复后自动补上', { n: waiting.length })}{live.state.dropped > 0 ? t('（最早的 {n} 段等太久，已丢弃）', { n: live.state.dropped }) : ''}<button onClick={live.retryAll}><RefreshCw size={11} />{t('立即重试')}</button></p></div> }] : []),
   ].sort((a, b) => a.at - b.at)
   const materials = section.materials
   const status = listening ? 'listening' : starting ? 'starting' : section.liveEndedAt ? 'ended' : 'paused'
@@ -188,7 +191,7 @@ export function LiveClass({ courses, setCourses, notify }: Props) {
       </div>
     </div>
     <input ref={fileRef} type="file" multiple hidden accept={ACCEPT} onChange={(event) => upload(event.target.files)} />
-    {isThis && live.state.error && <div className="live-banner"><CircleHelp size={16} /><p>{live.state.error}</p>{pending.some((chunk) => chunk.status === 'failed') && <button className="live-banner-retry" onClick={live.retryAll}><RefreshCw size={13} />{t('全部重试')}</button>}<Link to="/settings"><Settings size={13} />{t('去设置')}</Link><button aria-label={t('关闭')} onClick={live.dismissError}><X size={14} /></button></div>}
+    {isThis && live.state.error && <div className="live-banner"><CircleHelp size={16} /><p>{live.state.engine === 'browser' ? live.state.error : t('语音识别暂时不可用：{error}。录音会先保存，后台自动重试，恢复后转写会自己补上；这条提示只出现一次。', { error: live.state.error.replace(/[。.]$/, '') })}</p><Link to="/settings"><Settings size={13} />{t('去设置')}</Link><button aria-label={t('关闭')} onClick={live.dismissError}><X size={14} /></button></div>}
     <div className="live-tabs" role="tablist">
       <button role="tab" aria-selected={tab === 'transcript'} className={tab === 'transcript' ? 'active' : ''} onClick={() => setTab('transcript')}>{t('实时转写')}</button>
       <button role="tab" aria-selected={tab === 'questions'} className={tab === 'questions' ? 'active' : ''} onClick={() => setTab('questions')}>{t('提问')} {questions.length > 0 && <em>{questions.length}</em>}</button>

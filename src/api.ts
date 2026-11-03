@@ -187,5 +187,6 @@ export const filesApi = {
     return apiFetch<{ text: string; model: string; source: string; latency_ms: number }>('/api/transcribe', { method: 'POST', body: form, stt: true, signal: options.signal })
   },
   health: () => apiFetch<HealthInfo>('/api/health'),
+  checkStt: () => apiFetch<{ ok: boolean; source: string; base_url: string; model: string; latency_ms: number | null; error: string | null }>('/api/stt/check', { method: 'POST', stt: true }),
   checkAi: () => apiFetch<{ ok: boolean; source: string; base_url: string; model: string | null; latency_ms: number | null; reply: string | null; error: string | null }>('/api/ai/check', { method: 'POST', ai: true }),
 }

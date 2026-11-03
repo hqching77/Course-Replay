@@ -610,3 +610,7 @@ button.semester-row svg { color: #68717f; transition: transform .2s ease; }
 .question-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 9px; }
 .source-strip .source-chip, .source-strip a { flex: none; padding: 5px 8px; border: 1px solid #2c343e; border-radius: 6px; color: #9aa4b0; white-space: nowrap; }
 .source-strip a { color: var(--lime); border-color: #3f4b35; text-decoration: none; }
+
+/* Per-service test buttons in 设置 */
+.section-test { display: flex; flex-direction: column; align-items: flex-start; gap: 9px; margin-top: 14px; }
+.section-test .check-row { width: 100%; }

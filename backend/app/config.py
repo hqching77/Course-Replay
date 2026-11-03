@@ -1,4 +1,3 @@
-from functools import lru_cache
 from pathlib import Path
 
 from pydantic import field_validator
@@ -89,6 +88,25 @@ class Settings(BaseSettings):
         return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
 
 
-@lru_cache
+_ENV_FILES = (Path(".env"), Path("../.env"))
+_loaded: tuple[tuple[int | None, ...], Settings] | None = None
+
+
+def _env_stamp() -> tuple[int | None, ...]:
+    stamps: list[int | None] = []
+    for path in _ENV_FILES:
+        try:
+            stamps.append(path.stat().st_mtime_ns)
+        except OSError:
+            stamps.append(None)
+    return tuple(stamps)
+
+
 def get_settings() -> Settings:
-    return Settings()
+    """Current settings. Editing .env takes effect on the next request (AI / speech keys,
+    models, limits) — no restart needed. The database and CORS are read once at startup."""
+    global _loaded
+    stamp = _env_stamp()
+    if _loaded is None or _loaded[0] != stamp:
+        _loaded = (stamp, Settings(_env_file=_ENV_FILES))
+    return _loaded[1]

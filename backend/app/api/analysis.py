@@ -23,6 +23,7 @@ from app.schemas import (
     StudyAskRequest,
     StudyAskResponse,
     FileUploadRead,
+    SttCheckResponse,
     TranscribeResponse,
     VisualDocumentInfo,
     VisualJobStartResponse,
@@ -576,6 +577,34 @@ async def check_ai(request: Request, _user: User | None = Depends(require_ai_acc
         latency_ms=round((time.perf_counter() - started) * 1000),
         reply=reply.strip()[:40],
     )
+
+
+def _check_wav(seconds: float = 1.0, rate: int = 16000) -> bytes:
+    """A short, quiet WAV for testing a speech-to-text provider without a microphone."""
+    import io
+    import wave
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(rate)
+        out.writeframes(b"\x00\x00" * int(seconds * rate))
+    return buffer.getvalue()
+
+
+@router.post("/stt/check", response_model=SttCheckResponse)
+async def check_stt(request: Request, _user: User | None = Depends(require_stt_access)) -> SttCheckResponse:
+    """Real round trip to the speech-to-text service the user has selected (no microphone needed)."""
+    config = stt_config(request)
+    if not config.configured:
+        return SttCheckResponse(ok=False, source=config.source, base_url=config.base_url, model=config.model,
+                                error="服务器还没有配置语音识别，可以改用自己的接口或浏览器内置识别")
+    try:
+        _, latency = await transcribe_audio(config, _check_wav(), "check.wav", "audio/wav")
+    except RuntimeError as exc:
+        return SttCheckResponse(ok=False, source=config.source, base_url=config.base_url, model=config.model, error=str(exc))
+    return SttCheckResponse(ok=True, source=config.source, base_url=config.base_url, model=config.model, latency_ms=latency)
 
 
 @router.post("/transcribe", response_model=TranscribeResponse)

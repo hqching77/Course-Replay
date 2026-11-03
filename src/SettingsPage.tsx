@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useState } from 'react'
-import { AudioLines, Bot, CalendarDays, Check, CheckCircle2, CircleAlert, Eye, EyeOff, Languages, LogIn, LogOut, Mic, PenLine, RefreshCw, Server } from 'lucide-react'
+import { AudioLines, Bot, CalendarDays, Check, CheckCircle2, CircleAlert, Eye, EyeOff, Languages, LogIn, LogOut, Mic, PenLine, RefreshCw, Server, Zap } from 'lucide-react'
 import { ApiError, filesApi } from './api'
 import { AccountView, syncLabel } from './account'
 import { initialsOf } from './session'
@@ -47,31 +47,52 @@ export function SettingsPage({ account, notify }: { account: AccountView; notify
   const [micTest, setMicTest] = useState<{ state: 'idle' | 'recording' | 'transcribing' | 'done' | 'error'; text?: string; level?: number }>({ state: 'idle' })
   const check = settings.lastCheck
 
+  const [testing, setTesting] = useState<'chat' | 'stt' | null>(null)
+
+  /** Real round trip to the selected chat model. */
+  const testChat = async (): Promise<CheckResult['chat']> => {
+    if (settings.chat.mode === 'custom' && !Object.keys(chatHeaders(settings)).length) return { ok: false, source: 'custom', error: t('请先填写自己的 API Key') }
+    try {
+      const ai = await filesApi.checkAi()
+      return { ok: ai.ok, source: ai.source, model: ai.model, latencyMs: ai.latency_ms, error: ai.error || undefined }
+    } catch (error) {
+      return { ok: false, source: settings.chat.mode, needsLogin: error instanceof ApiError && error.status === 401, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  /** Real round trip to the selected speech-to-text service (a short test clip, no microphone). */
+  const testStt = async (): Promise<CheckResult['stt']> => {
+    if (settings.stt.mode === 'browser') return { ok: browserSpeechAvailable(), source: 'browser', error: browserSpeechAvailable() ? undefined : t('这个浏览器没有内置语音识别') }
+    if (settings.stt.mode === 'custom' && !Object.keys(sttHeaders(settings)).length) return { ok: false, source: 'custom', error: t('请先填写自己的 API Key') }
+    try {
+      const stt = await filesApi.checkStt()
+      return { ok: stt.ok, source: stt.source, model: stt.model, latencyMs: stt.latency_ms, error: stt.error || undefined }
+    } catch (error) {
+      return { ok: false, source: settings.stt.mode, needsLogin: error instanceof ApiError && error.status === 401, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  const testOne = async (which: 'chat' | 'stt') => {
+    setTesting(which)
+    const result = which === 'chat' ? await testChat() : await testStt()
+    const base: CheckResult = check || { at: Date.now(), backend: { ok: true }, chat: { ok: false }, stt: { ok: false, source: settings.stt.mode } }
+    updateSettings({ lastCheck: { ...base, at: Date.now(), [which]: result } })
+    setTesting(null)
+    const name = which === 'chat' ? t('对话 AI') : t('语音转文字')
+    notify(result.ok ? t('{name}：测试通过', { name }) : t('{name}：测试没通过，原因见下方', { name }))
+  }
+
+  const sourceLabel = (source?: string) => source === 'custom' ? t('自己的接口') : source === 'browser' ? t('浏览器内置识别') : t('服务器默认')
+  const chatDetail = (chat: CheckResult['chat']) => chat.ok ? `${sourceLabel(chat.source)} · ${chat.model} · ${chat.latencyMs} ms` : chat.needsLogin ? t('登录后才能测试 AI') : chat.error ? t(chat.error) : t('未通过') // i18n-ok: server message
+  const sttDetail = (stt: CheckResult['stt']) => stt.ok ? `${sourceLabel(stt.source)}${stt.model ? ` · ${stt.model}` : ''}${stt.latencyMs ? ` · ${stt.latencyMs} ms` : ''}` : stt.needsLogin ? t('登录后才能测试语音识别') : stt.error ? t(stt.error) : t('未通过') // i18n-ok: server message
+
   const runCheck = async (showNotice = true) => {
     setChecking(true)
     const result: CheckResult = { at: Date.now(), backend: { ok: false }, chat: { ok: false }, stt: { ok: false, source: settings.stt.mode } }
     try {
       const health = await filesApi.health()
       result.backend = { ok: true, version: health.version, database: health.database }
-      // Real round trip to whichever chat model is selected.
-      if (settings.chat.mode === 'custom' && !Object.keys(chatHeaders(settings)).length) {
-        result.chat = { ok: false, source: 'custom', error: t('请先填写自己的 API Key') }
-      } else {
-        try {
-          const ai = await filesApi.checkAi()
-          result.chat = { ok: ai.ok, source: ai.source, model: ai.model, latencyMs: ai.latency_ms, error: ai.error || undefined }
-        } catch (error) {
-          result.chat = { ok: false, source: settings.chat.mode, needsLogin: error instanceof ApiError && error.status === 401, error: error instanceof Error ? error.message : String(error) }
-        }
-      }
-      if (settings.stt.mode === 'browser') {
-        result.stt = { ok: browserSpeechAvailable(), source: 'browser', error: browserSpeechAvailable() ? undefined : t('这个浏览器没有内置语音识别') }
-      } else if (settings.stt.mode === 'custom') {
-        const configured = Boolean(Object.keys(sttHeaders(settings)).length)
-        result.stt = { ok: configured, source: 'custom', model: settings.stt.model, error: configured ? undefined : t('请先填写自己的 API Key') }
-      } else {
-        result.stt = { ok: health.stt_configured, source: 'server', model: health.stt_model, error: health.stt_configured ? undefined : t('服务器还没有配置语音识别') }
-      }
+      ;[result.chat, result.stt] = await Promise.all([testChat(), testStt()])
     } catch (error) {
       result.backend = { ok: false, error: error instanceof Error ? error.message : String(error) }
       result.chat = { ok: false, error: t('后端离线') }
@@ -135,8 +156,8 @@ export function SettingsPage({ account, notify }: { account: AccountView; notify
         <div className="settings-head"><span className="settings-icon"><Server size={20} /></span><div><h2>{t('服务端状态')}</h2><p>{lastChecked ? t('上次检查 {time}', { time: lastChecked }) : t('还没有检查过')}</p></div><button className="button secondary compact" disabled={checking} onClick={() => void runCheck()}>{checking ? <RefreshCw className="spin-icon" size={15} /> : <Check size={15} />}{checking ? t('检查中') : t('检查服务端配置')}</button></div>
         {check ? <div className="check-list">
           <StatusRow ok={check.backend.ok} label={t('后端服务')} detail={check.backend.ok ? `v${check.backend.version} · ${t('数据库')} ${check.backend.database}` : check.backend.error || t('后端离线')} />
-          <StatusRow ok={check.chat.ok} warn={check.chat.needsLogin} label={t('对话 AI')} detail={check.chat.ok ? `${check.chat.source === 'custom' ? t('自己的接口') : t('服务器默认')} · ${check.chat.model} · ${check.chat.latencyMs} ms` : check.chat.needsLogin ? t('登录后才能测试 AI') : check.chat.error || t('未通过')} />
-          <StatusRow ok={check.stt.ok} label={t('语音转文字')} detail={check.stt.ok ? `${check.stt.source === 'browser' ? t('浏览器内置识别') : check.stt.source === 'custom' ? t('自己的接口') : t('服务器默认')}${check.stt.model ? ` · ${check.stt.model}` : ''}` : check.stt.error || t('未配置')} />
+          <StatusRow ok={check.chat.ok} warn={check.chat.needsLogin} label={t('对话 AI')} detail={chatDetail(check.chat)} />
+          <StatusRow ok={check.stt.ok} warn={check.stt.needsLogin} label={t('语音转文字')} detail={sttDetail(check.stt)} />
         </div> : <p className="field-hint">{t('点「检查服务端配置」会真实调用一次 AI，确认能用。')}</p>}
       </section>
 
@@ -147,6 +168,10 @@ export function SettingsPage({ account, notify }: { account: AccountView; notify
           <label className={chat.mode === 'custom' ? 'active' : ''}><input type="radio" checked={chat.mode === 'custom'} onChange={() => updateSettings((current) => ({ ...current, chat: { ...current.chat, mode: 'custom' } }))} /><span><strong>{t('自己的接口')}</strong><small>{t('任何 OpenAI 兼容接口；生成笔记需要模型支持图片输入')}</small></span></label>
         </div>
         {chat.mode === 'custom' && <ProviderFields presets={CHAT_PRESETS} value={chat} onChange={(changes) => updateSettings((current) => ({ ...current, chat: { ...current.chat, ...changes } }))} />}
+        <div className="section-test">
+          <button className="button secondary compact" disabled={testing !== null} onClick={() => void testOne('chat')}>{testing === 'chat' ? <RefreshCw className="spin-icon" size={14} /> : <Zap size={14} />}{testing === 'chat' ? t('测试中…') : t('测试对话 AI')}</button>
+          {check && testing !== 'chat' && <StatusRow ok={check.chat.ok} warn={check.chat.needsLogin} label={t('上次测试')} detail={chatDetail(check.chat)} />}
+        </div>
       </section>
 
       <section className="panel settings-section">
@@ -157,8 +182,12 @@ export function SettingsPage({ account, notify }: { account: AccountView; notify
           <label className={stt.mode === 'browser' ? 'active' : ''}><input type="radio" checked={stt.mode === 'browser'} onChange={() => updateSettings((current) => ({ ...current, stt: { ...current.stt, mode: 'browser' } }))} /><span><strong>{t('浏览器内置')}</strong><small>{browserSpeechAvailable() ? t('免费、实时；Chrome 需要能访问 Google，国内网络通常不可用') : t('这个浏览器不支持')}</small></span></label>
         </div>
         {stt.mode === 'custom' && <ProviderFields presets={STT_PRESETS} value={stt} onChange={(changes) => updateSettings((current) => ({ ...current, stt: { ...current.stt, ...changes } }))} />}
+        <div className="section-test">
+          <button className="button secondary compact" disabled={testing !== null} onClick={() => void testOne('stt')}>{testing === 'stt' ? <RefreshCw className="spin-icon" size={14} /> : <Zap size={14} />}{testing === 'stt' ? t('测试中…') : t('测试语音识别')}</button>
+          {check && testing !== 'stt' && <StatusRow ok={check.stt.ok} warn={check.stt.needsLogin} label={t('上次测试')} detail={sttDetail(check.stt)} />}
+        </div>
         <div className="mic-test">
-          <button className="button secondary compact" disabled={micTest.state === 'recording' || micTest.state === 'transcribing'} onClick={() => void testMic()}>{micTest.state === 'recording' ? <span className="live-dot" /> : micTest.state === 'transcribing' ? <RefreshCw className="spin-icon" size={14} /> : <Mic size={14} />}{micTest.state === 'recording' ? t('录音中，请说话…') : micTest.state === 'transcribing' ? t('识别中…') : t('测试麦克风识别')}</button>
+          <button className="button secondary compact" disabled={micTest.state === 'recording' || micTest.state === 'transcribing'} onClick={() => void testMic()}>{micTest.state === 'recording' ? <span className="live-dot" /> : micTest.state === 'transcribing' ? <RefreshCw className="spin-icon" size={14} /> : <Mic size={14} />}{micTest.state === 'recording' ? t('录音中，请说话…') : micTest.state === 'transcribing' ? t('识别中…') : t('用麦克风说一句试试')}</button>
           {micTest.state === 'recording' && <span className="level-meter"><i style={{ transform: `scaleX(${Math.max(0.04, micTest.level || 0)})` }} /></span>}
           {micTest.text && <p className={micTest.state === 'error' ? 'mic-error' : ''}>{micTest.text}</p>}
         </div>

@@ -38,7 +38,10 @@ class AIProvider:
             cause = str(exc.__cause__ or "连接在响应完成前被关闭")
             raise RuntimeError(f"无法稳定连接 AI 服务，已自动重试 2 次：{cause}") from exc
         if isinstance(exc, APIStatusError):
-            raise RuntimeError(f"AI 服务返回 HTTP {exc.status_code}：{exc.message}") from exc
+            from app.providers import api_error_detail
+
+            hint = {401: "Key 无效或已过期", 403: "账号没有使用这个模型的权限", 404: "接口地址或模型名不对", 429: "请求太频繁或额度已用完"}.get(exc.status_code, "")
+            raise RuntimeError(f"AI 服务返回 HTTP {exc.status_code}：{api_error_detail(exc)}" + (f"（{hint}）" if hint else "")) from exc
         raise exc
 
     async def chat(

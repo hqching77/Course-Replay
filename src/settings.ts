@@ -26,6 +26,7 @@ export const CHAT_PRESETS: ProviderPreset[] = [
 
 export const STT_PRESETS: ProviderPreset[] = [
   { id: 'siliconflow', label: '硅基流动 SenseVoice', baseUrl: 'https://api.siliconflow.cn/v1', model: 'FunAudioLLM/SenseVoiceSmall', note: 'free' }, // i18n-ok: translated where shown
+  { id: 'siliconflow-intl', label: '硅基流动国际版 SenseVoice', baseUrl: 'https://api.siliconflow.com/v1', model: 'FunAudioLLM/SenseVoiceSmall', note: 'free' }, // i18n-ok: translated where shown
   { id: 'groq', label: 'Groq Whisper Turbo', baseUrl: 'https://api.groq.com/openai/v1', model: 'whisper-large-v3-turbo', note: '$0.04/h' },
   { id: 'openai', label: 'OpenAI gpt-4o-mini-transcribe', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini-transcribe', note: '$0.18/h' },
   { id: 'custom', label: '自定义', baseUrl: '', model: '' }, // i18n-ok: translated where shown
@@ -49,7 +50,7 @@ export interface CheckResult {
   at: number
   backend: { ok: boolean; version?: string; database?: string; error?: string }
   chat: { ok: boolean; source?: string; model?: string | null; latencyMs?: number | null; error?: string; needsLogin?: boolean }
-  stt: { ok: boolean; source: string; model?: string | null; error?: string }
+  stt: { ok: boolean; source: string; model?: string | null; latencyMs?: number | null; error?: string; needsLogin?: boolean }
 }
 
 export interface AppSettings {

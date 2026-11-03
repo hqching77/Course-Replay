@@ -126,6 +126,34 @@ def _supports_whisper_params(model: str) -> bool:
     return "whisper" in lowered or "transcribe" in lowered
 
 
+def api_error_detail(exc: APIStatusError) -> str:
+    """The provider's own message ("Invalid token"), without the SDK's "Error code: 401 - {...}" wrapper."""
+    body = exc.body
+    if isinstance(body, dict):
+        inner = body.get("error")
+        message = body.get("message") or (inner.get("message") if isinstance(inner, dict) else inner)
+        if isinstance(message, str) and message.strip():
+            return message.strip()[:300]
+    return re.sub(r"^Error code: \d+ - ", "", str(exc.message or "")).strip()[:300] or "未知错误"
+
+
+def stt_error_hint(status: int, base_url: str) -> str:
+    """What usually causes this error, so the user knows what to fix."""
+    siliconflow_cn = "siliconflow.cn" in base_url
+    if status == 401:
+        return ("Key 无效：确认复制完整；如果是在 cloud.siliconflow.com（国际版）注册的 Key，接口地址要用 https://api.siliconflow.com/v1"
+                if siliconflow_cn else "Key 无效或已过期，请在服务商后台重新生成")
+    if status == 403:
+        return "这个账号不能用该模型：去服务商后台确认已完成实名认证、模型已开通"
+    if status in (400, 404):
+        return "接口地址或模型名不对：硅基流动的模型名是 FunAudioLLM/SenseVoiceSmall，地址以 /v1 结尾"
+    if status == 429:
+        return "请求太频繁或额度已用完，稍后会自动重试"
+    if status >= 500:
+        return "服务商暂时故障，稍后会自动重试"
+    return ""
+
+
 async def transcribe_audio(
     config: SttConfig,
     audio: bytes,
@@ -156,7 +184,8 @@ async def transcribe_audio(
     except APIConnectionError as exc:
         raise RuntimeError(f"无法连接语音识别接口：{exc.__cause__ or exc}") from exc
     except APIStatusError as exc:
-        raise RuntimeError(f"语音识别接口返回 HTTP {exc.status_code}：{exc.message}") from exc
+        hint = stt_error_hint(exc.status_code, config.base_url)
+        raise RuntimeError(f"语音识别接口返回 HTTP {exc.status_code}：{api_error_detail(exc)}" + (f"。{hint}" if hint else "")) from exc
     latency = round((time.perf_counter() - started) * 1000)
     text = getattr(result, "text", None) if not isinstance(result, str) else result
     return clean_transcript(str(text or "")), latency

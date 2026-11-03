@@ -18,8 +18,8 @@ import { updateSection } from './ui'
 export interface PendingChunk {
   id: string
   startedAt: number
-  status: 'transcribing' | 'failed'
-  error?: string
+  /** queued = waiting for speech recognition to work again (retried automatically). */
+  status: 'transcribing' | 'queued'
 }
 
 export interface LiveState {
@@ -30,15 +30,17 @@ export interface LiveState {
   level: number
   pending: PendingChunk[]
   interim: string
+  /** Shown once per problem (not once per audio chunk); cleared when it works again. */
   error?: string
+  /** Oldest recordings dropped because recognition was down for very long. */
+  dropped: number
 }
 
 interface LiveControls {
   state: LiveState
   start: (courseId: string, sectionId: string) => Promise<void>
   stop: () => Promise<void>
-  retry: (chunkId: string) => void
-  /** Re-send every chunk that failed (audio is kept until it's transcribed). */
+  /** Retry the queued recordings now instead of waiting for the next automatic retry. */
   retryAll: () => void
   dismissError: () => void
   /** Resolves once in-flight chunks are transcribed (or after `timeoutMs`). */
@@ -51,7 +53,7 @@ const insertSegment = (list: TranscriptSegment[], segment: TranscriptSegment) =>
   [...list, segment].sort((a, b) => a.startedAt - b.startedAt)
 
 export function LiveProvider({ courses, setCourses, children }: { courses: Course[]; setCourses: Dispatch<SetStateAction<Course[]>>; children: ReactNode }) {
-  const [state, setState] = useState<LiveState>({ status: 'idle', engine: 'server', level: 0, pending: [], interim: '' })
+  const [state, setState] = useState<LiveState>({ status: 'idle', engine: 'server', level: 0, pending: [], interim: '', dropped: 0 })
   const capture = useRef<Capture | null>(null)
   const target = useRef<{ courseId: string; sectionId: string } | null>(null)
   const audioById = useRef(new Map<string, { blob: Blob; startedAt: number; endedAt: number; courseId: string; sectionId: string }>())
@@ -69,14 +71,33 @@ export function LiveProvider({ courses, setCourses, children }: { courses: Cours
     if (inFlight.current === 0) { waiters.current.forEach((resolve) => resolve()); waiters.current = [] }
   }
 
-  const transcribe = useCallback(async (chunkId: string) => {
+  // While speech recognition is failing, recordings wait here and are retried with backoff
+  // (5 s → 10 s → … → 60 s); the user is told once, not once per chunk.
+  const outage = useRef(false)
+  const warned = useRef(false)
+  const retryTimer = useRef<number | null>(null)
+  const backoff = useRef(0)
+  const queued = useRef<string[]>([])
+
+  const queuedBytes = () => queued.current.reduce((sum, id) => sum + (audioById.current.get(id)?.blob.size || 0), 0)
+
+  const setChunk = (chunkId: string, startedAt: number, status: PendingChunk['status'] | null) => setState((current) => ({
+    ...current,
+    pending: status === null ? current.pending.filter((item) => item.id !== chunkId)
+      : [...current.pending.filter((item) => item.id !== chunkId), { id: chunkId, startedAt, status }],
+  }))
+
+  const transcribe = useCallback(async (chunkId: string, probe = false): Promise<boolean> => {
     const chunk = audioById.current.get(chunkId)
-    if (!chunk) return
+    if (!chunk) return true
+    if (outage.current && !probe) {
+      // Recognition is down: keep the recording for later instead of hitting the service again.
+      if (!queued.current.includes(chunkId)) queued.current.push(chunkId)
+      setChunk(chunkId, chunk.startedAt, 'queued')
+      return false
+    }
     inFlight.current++
-    setState((current) => ({
-      ...current,
-      pending: [...current.pending.filter((item) => item.id !== chunkId), { id: chunkId, startedAt: chunk.startedAt, status: 'transcribing' }],
-    }))
+    setChunk(chunkId, chunk.startedAt, 'transcribing')
     const section = coursesRef.current.find((course) => course.id === chunk.courseId)?.sections.find((item) => item.id === chunk.sectionId)
     const lecture = getSettings().lectureLanguage
     try {
@@ -85,21 +106,75 @@ export function LiveProvider({ courses, setCourses, children }: { courses: Cours
         prompt: transcriptText(section?.transcript, 200),
       })
       audioById.current.delete(chunkId)
-      setState((current) => ({ ...current, pending: current.pending.filter((item) => item.id !== chunkId) }))
+      queued.current = queued.current.filter((id) => id !== chunkId)
+      setChunk(chunkId, chunk.startedAt, null)
       if (result.text.trim()) addSegment(chunk.courseId, chunk.sectionId, { id: chunkId, text: result.text.trim(), startedAt: chunk.startedAt, endedAt: chunk.endedAt })
+      if (outage.current) {
+        // Working again: clear the warning and catch up on everything that waited.
+        outage.current = false
+        warned.current = false
+        backoff.current = 0
+        setState((current) => ({ ...current, error: undefined }))
+        void drain()
+      }
+      return true
     } catch (error) {
+      if (error instanceof ApiError && (error.status === 400 || error.status === 413)) {
+        // Something wrong with this one recording (empty / too large): drop it, it will never work.
+        audioById.current.delete(chunkId)
+        setChunk(chunkId, chunk.startedAt, null)
+        return true
+      }
+      if (!queued.current.includes(chunkId)) queued.current.push(chunkId)
+      queued.current.sort((a, b) => (audioById.current.get(a)?.startedAt || 0) - (audioById.current.get(b)?.startedAt || 0))
+      setChunk(chunkId, chunk.startedAt, 'queued')
+      // Don't keep more than ~80 MB (about 40 minutes) of audio waiting.
+      let dropped = 0
+      while (queued.current.length > 1 && queuedBytes() > 80 * 1024 * 1024) {
+        const oldest = queued.current.shift()!
+        setChunk(oldest, audioById.current.get(oldest)?.startedAt || 0, null)
+        audioById.current.delete(oldest)
+        dropped++
+      }
       const message = error instanceof Error ? error.message : t('语音识别失败')
-      // Offline / not configured / not signed in: every chunk would fail the same way, so say it once at the top.
-      const blocking = error instanceof ApiError && [0, 401, 403, 503].includes(error.status)
-      setState((current) => ({
-        ...current,
-        error: blocking ? message : current.error,
-        pending: current.pending.map((item) => item.id === chunkId ? { ...item, status: 'failed', error: message } : item),
-      }))
+      const firstWarning = !warned.current
+      warned.current = true
+      setState((current) => ({ ...current, dropped: current.dropped + dropped, error: firstWarning ? message : current.error }))
+      outage.current = true
+      scheduleRetry()
+      return false
     } finally {
       finishOne()
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addSegment])
+
+  /** Send everything that waited, oldest first, one at a time (stops if it fails again). */
+  const drain = async () => {
+    while (queued.current.length && !outage.current) {
+      const next = queued.current[0]
+      if (!(await transcribe(next, true))) return
+    }
+  }
+
+  function scheduleRetry() {
+    if (retryTimer.current !== null) return
+    const delay = [5, 10, 20, 40][backoff.current] ?? 60
+    backoff.current++
+    retryTimer.current = window.setTimeout(() => {
+      retryTimer.current = null
+      const next = queued.current[0]
+      if (!next) { outage.current = false; return }
+      void transcribe(next, true).then((ok) => { if (ok) void drain() })
+    }, delay * 1000)
+  }
+
+  const retryNow = () => {
+    if (retryTimer.current !== null) { window.clearTimeout(retryTimer.current); retryTimer.current = null }
+    backoff.current = 0
+    const next = queued.current[0]
+    if (next) void transcribe(next, true).then((ok) => { if (ok) void drain() })
+  }
 
   const stop = useCallback(async () => {
     const running = capture.current
@@ -113,9 +188,16 @@ export function LiveProvider({ courses, setCourses, children }: { courses: Cours
     const settings = getSettings()
     const engine = settings.stt.mode === 'browser' ? 'browser' : 'server'
     target.current = { courseId, sectionId }
-    setState({ courseId, sectionId, status: 'starting', engine, level: 0, pending: [], interim: '', error: undefined })
+    // Recordings still waiting from before keep their place; a new session may warn once again.
+    warned.current = false
+    setState((current) => ({ courseId, sectionId, status: 'starting', engine, level: 0, pending: current.pending, interim: '', error: undefined, dropped: current.dropped }))
     updateSection(setCourses, courseId, sectionId, (current) => ({ ...current, liveStartedAt: current.liveStartedAt ?? Date.now(), liveEndedAt: undefined }))
-    const onError = (message: string) => setState((current) => ({ ...current, error: message }))
+    // Browser recognition reports the same problem over and over: tell the user once.
+    const onError = (message: string) => {
+      if (warned.current) return
+      warned.current = true
+      setState((current) => ({ ...current, error: message }))
+    }
     try {
       if (engine === 'browser') {
         capture.current = startBrowserCapture(settings.lectureLanguage === 'en' ? 'en' : 'zh', {
@@ -148,17 +230,16 @@ export function LiveProvider({ courses, setCourses, children }: { courses: Cours
   }), [])
 
   // Release the microphone when the workspace goes away (sign-out, user switch).
-  useEffect(() => () => { void capture.current?.stop() }, [])
+  useEffect(() => () => {
+    void capture.current?.stop()
+    if (retryTimer.current !== null) window.clearTimeout(retryTimer.current)
+  }, [])
 
   const value = useMemo<LiveControls>(() => ({
     state,
     start,
     stop,
-    retry: (chunkId) => { void transcribe(chunkId) },
-    retryAll: () => {
-      setState((current) => ({ ...current, error: undefined }))
-      state.pending.filter((item) => item.status === 'failed').forEach((item) => { void transcribe(item.id) })
-    },
+    retryAll: retryNow,
     dismissError: () => setState((current) => ({ ...current, error: undefined })),
     settle,
   }), [settle, start, state, stop, transcribe])
