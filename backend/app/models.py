@@ -371,3 +371,21 @@ class UploadedFile(Base):
     stored_path: Mapped[str] = mapped_column(Text)
     size: Mapped[int] = mapped_column(BigInteger, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class HomeworkItem(Base):
+    """One 题目答疑 problem: question, answers, hints, marking and the conclusion (as the browser sends it).
+
+    Stored per problem (not inside the course) so a phone adding the answer and a PC open on the same
+    course can't overwrite each other's work; `version` catches two devices editing the same problem.
+    """
+
+    __tablename__ = "homework_items"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    course_id: Mapped[str] = mapped_column(String(200), index=True)
+    data: Mapped[dict] = mapped_column(EncryptedJSON, default=dict)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)

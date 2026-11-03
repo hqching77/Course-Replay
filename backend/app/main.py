@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import logging
 
-from app.api import analysis, auth, courses, documents, health, importer, practice, workspace
+from app.api import analysis, auth, courses, documents, health, homework, importer, practice, workspace
 from app.config import Settings, get_settings
 from app.crypto import parse_key
 from app.database import create_db_and_tables
@@ -70,6 +70,7 @@ app.include_router(auth.router, prefix=settings.api_prefix)
 app.include_router(workspace.router, prefix=settings.api_prefix)
 app.include_router(importer.router, prefix=settings.api_prefix)
 app.include_router(practice.router, prefix=settings.api_prefix)
+app.include_router(homework.router, prefix=settings.api_prefix)
 
 
 @app.get("/", include_in_schema=False)

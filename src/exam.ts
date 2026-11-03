@@ -248,3 +248,17 @@ export function declareKnowledge(course: Course, sectionId: string, nodeId: stri
   return next
 }
 
+
+/** Knowledge points whose title / summary share the most words with `text` (best first). */
+export function rankNodes(course: Course, text: string, limit = 3) {
+  const words = grams(text)
+  const ranked: { section: Section; nodeId: string; title: string; content: string; score: number }[] = []
+  for (const section of course.sections) {
+    for (const node of sectionNodes(section)) {
+      let score = 0
+      grams(`${node.title} ${node.summary}`).forEach((gram) => { if (words.has(gram)) score++ })
+      if (score >= 2) ranked.push({ section, nodeId: node.id, title: node.title, content: node.content, score })
+    }
+  }
+  return ranked.sort((a, b) => b.score - a.score).slice(0, limit)
+}

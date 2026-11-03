@@ -62,6 +62,7 @@ import { SearchDialog, TRANSCRIPT_NODE_ID, openSearch } from './Search'
 import { ImportPage } from './ImportPage'
 import { ExamPage } from './ExamPage'
 import { KnowledgePage } from './KnowledgePage'
+import { HomeworkHome, HomeworkPage } from './HomeworkPage'
 import { matchNode, recordAnswer } from './exam'
 import { knowledgeEntries, learnerMemory, levelLabel as knowledgeLabel, publishCourses, relatedElsewhere } from './memory'
 import { GradeView } from './Practice'
@@ -175,6 +176,9 @@ function Workspace({ controls }: { controls: SessionControls }) {
             <Route path="/courses/:courseId/import" element={<ImportPage {...page} />} />
             <Route path="/courses/:courseId/exam" element={<ExamPage {...page} />} />
             <Route path="/knowledge" element={<KnowledgePage courses={courses} setCourses={setCourses} />} />
+            <Route path="/homework" element={<HomeworkHome courses={courses} />} />
+            <Route path="/courses/:courseId/homework" element={<HomeworkPage {...page} account={session.status === 'account'} />} />
+            <Route path="/courses/:courseId/homework/:itemId" element={<HomeworkPage {...page} account={session.status === 'account'} />} />
             <Route path="/courses/:courseId/sections/:sectionId" element={<SectionDetail {...page} />} />
             <Route path="/courses/:courseId/sections/:sectionId/live" element={<LiveClass {...page} />} />
             <Route path="/courses/:courseId/sections/:sectionId/replay" element={<Replay {...page} />} />
@@ -204,7 +208,7 @@ function Sidebar({ account }: { account: AccountView }) {
   // Which area the page belongs to: course pages count as 课程空间, not 课堂重放.
   const area = path === '/live' || /\/live$/.test(path) ? 'live'
     : path === '/replay' || /\/replay$/.test(path) ? 'replay'
-      : path.startsWith('/settings') ? 'settings' : path.startsWith('/knowledge') ? 'knowledge' : 'home'
+      : path.startsWith('/settings') ? 'settings' : path.startsWith('/knowledge') ? 'knowledge' : path === '/homework' || /\/homework(\/|$)/.test(path) ? 'homework' : 'home'
   // 上课中: back to the class that's running, otherwise pick a course and start.
   const listening = live.state.status !== 'idle' && live.state.courseId && live.state.sectionId
   const liveTo = listening ? `/courses/${live.state.courseId}/sections/${live.state.sectionId}/live` : '/live'
@@ -218,6 +222,7 @@ function Sidebar({ account }: { account: AccountView }) {
         <NavItem to="/" active={area === 'home'} icon={<LayoutDashboard size={18} />} label={t('课程空间')} />
         <NavItem to={liveTo} active={area === 'live'} icon={<Radio size={18} />} label={t('上课中')} badge={listening ? <span className="live-dot nav-live-dot" /> : undefined} />
         <NavItem to={courseId && sectionId ? `/courses/${courseId}/sections/${sectionId}/replay` : '/replay'} active={area === 'replay'} icon={<BrainCircuit size={18} />} label={t('课堂重放')} />
+        <NavItem to={courseId ? `/courses/${courseId}/homework` : '/homework'} active={area === 'homework'} icon={<MessageCircleQuestion size={18} />} label={t('题目答疑')} />
         <NavItem to="/knowledge" active={area === 'knowledge'} icon={<BookOpenCheck size={18} />} label={t('知识档案')} />
         <NavItem to="/settings" active={area === 'settings'} icon={<UserRound size={18} />} label={t('我的')} className="mobile-only" />
       </nav>
@@ -498,7 +503,7 @@ function CourseSections({ courses, setCourses, notify }: PageProps) {
   }
   return <div className="page">
     <div className="back-row"><Link to="/"><ArrowLeft size={16} />{t('全部课程')}</Link><span>/</span><span>{course.title}</span></div>
-    <PageHeader title={course.title} subtitle={courseSubtitle(course)} actions={<><Link className="button secondary" to={`/courses/${course.id}/exam`}><CalendarClock size={17} />{course.exam ? t('考前冲刺 · {name}', { name: course.exam.name }) : t('考前冲刺')}</Link><Link className="button secondary" to={`/courses/${course.id}/import`}><Library size={17} />{t('批量导入')}</Link><button className="button secondary" onClick={createSectionAndOpen}><Plus size={17} />{t('新建小节')}</button><button className="button primary" onClick={() => startLiveClass(course)}><Mic size={17} />{t('开始上课')}</button></>} />
+    <PageHeader title={course.title} subtitle={courseSubtitle(course)} actions={<><Link className="button secondary" to={`/courses/${course.id}/homework`}><MessageCircleQuestion size={17} />{t('题目答疑')}</Link><Link className="button secondary" to={`/courses/${course.id}/exam`}><CalendarClock size={17} />{course.exam ? t('考前冲刺 · {name}', { name: course.exam.name }) : t('考前冲刺')}</Link><Link className="button secondary" to={`/courses/${course.id}/import`}><Library size={17} />{t('批量导入')}</Link><button className="button secondary" onClick={createSectionAndOpen}><Plus size={17} />{t('新建小节')}</button><button className="button primary" onClick={() => startLiveClass(course)}><Mic size={17} />{t('开始上课')}</button></>} />
     <div className="overview-strip">
       <div><span>{t('小节')}</span><strong>{course.sections.length}</strong><small>{t('个独立单元')}</small></div>
       <div><span>{t('材料')}</span><strong>{stats.materials}</strong><small>{t('份课堂资料')}</small></div>

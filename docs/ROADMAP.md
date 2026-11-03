@@ -1,6 +1,6 @@
 # Roadmap: homework help, exam revision and weak-point memory
 
-Status: **Phase 1 done** (2026-11-03): 导入课本 / 批量导入, weak-point record, 考前冲刺, teacher's emphasis, past papers. Phase 2 not started. See "Phase 1 as built" below.
+Status: **Phase 1 done** (2026-11-03): 导入课本 / 批量导入, weak-point record, 考前冲刺, teacher's emphasis, past papers. Phase 2: **题目答疑 done** (2026-11-03, see "题目答疑 as built"); 错题本 / 今日复习 not started. See "Phase 1 as built" below.
 
 ## The problems
 
@@ -165,14 +165,34 @@ All AI output uses the `@@TAG` text format rather than JSON, so LaTeX can't brea
   - links in the exam diagnosis and plan.
 - **New exam plans start from the record:** mastered points are skipped and weak points start as 不会.
 
+## 题目答疑 as built
+
+- **Where:** 题目答疑 in the sidebar (opens the last course used) and on each course page (`/courses/:id/homework`).
+- **Question and answer are separate**, so the question can go in on a PC and the answer later from a phone or tablet:
+  - each problem is saved on its own (`homework_items` table, `/api/homework`), not inside the course, so two devices never overwrite each other's work;
+  - a `version` number turns a stale save into "已载入最新内容" instead of data loss;
+  - the PC re-reads the list every few seconds while the page is open, so an answer photographed on a phone shows up by itself;
+  - "用手机 / 平板交答案" shows a QR code for the problem's URL. The phone needs to be signed in to the same account.
+- **Input:**
+  - you can type (LaTeX works, with a 预览公式 tab) or use 拍照 / 上传图片、PDF;
+  - photos are shrunk on the device first, which also turns iPhone HEIC into JPEG;
+  - `/api/homework/read` copies the question, or the student's working line by line, into text once. The copy keeps the student's mistakes, and every later turn is text only.
+- **批改** (`/check`): 正确 / 部分正确 / 错误, the mistake type, the **first** wrong step, why it's wrong, and the correct final answer. Full steps are worked out but only shown on 看完整步骤. After that come 给我提示, 再交一次 and 结束这道题.
+- **带我起步** (`/guide`):
+  - one hint at a time: first which concept, then how to write the first step, then the next step based on the student's latest attempt;
+  - each attempt is checked (这一步对了 / 这一步有问题);
+  - the answer is never given unless 看完整解答 is pressed.
+- **结束这道题** (`/conclude`):
+  - the summary card has the key idea, the method to reuse, and where the student got stuck;
+  - 自己做出来了 only counts if the solution wasn't viewed;
+  - the result goes through the same `recordAnswer` as everything else (source 作业), so it shows in 薄弱点, 知识档案 and the exam plan, linked to the knowledge point the AI picked from the course's list.
+- **Context for the AI:** the two best-matching notes from the course, the course's knowledge-point list, and the 知识档案. The correct answer from marking is kept out of the hint history so hints can't give it away.
+
 ## Order
 
 | Phase | When | What |
 | --- | --- | --- |
 | 1 | Done | 导入课本 / 批量导入 (so all exam material is in) · weak-point record · minimal 考前冲刺 (diagnosis, daily plan, targeted practice) · teacher's emphasis from transcripts · past-paper upload |
-| 2 | Next | 题目答疑 (check + guide) writing into the weak-point record · 错题本 with 今日复习 |
+| 2 | 题目答疑 done; 错题本 next | 题目答疑 (check + guide) writing into the weak-point record · 错题本 with 今日复习 |
 | 3 | Later | 同类题 · formula sheet · deadlines/exam dates · 下课小测 |
 
-## Open questions
-
-- Will homework usually arrive as photos of handwritten work, PDFs, or typed text? (decides the Phase 2 input)

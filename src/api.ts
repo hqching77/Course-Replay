@@ -25,6 +25,7 @@ const DETAIL_PATTERNS: [RegExp, string][] = [
   [/^一次最多导入 (?<n>\d+) 个文件$/, '一次最多导入 {n} 个文件'], // i18n-ok: server message pattern
   [/^AI 回答失败：(?<error>.+)$/s, 'AI 回答失败：{error}'], // i18n-ok: server message pattern
   [/^AI 读试卷失败：(?<error>.+)$/s, 'AI 读试卷失败：{error}'], // i18n-ok: server message pattern
+  [/^AI 读图失败：(?<error>.+)$/s, 'AI 读图失败：{error}'], // i18n-ok: server message pattern
 ]
 
 function translateDetail(detail: string) {
@@ -260,4 +261,34 @@ export const filesApi = {
   health: () => apiFetch<HealthInfo>('/api/health'),
   checkStt: () => apiFetch<{ ok: boolean; source: string; base_url: string; model: string; latency_ms: number | null; error: string | null }>('/api/stt/check', { method: 'POST', stt: true }),
   checkAi: () => apiFetch<{ ok: boolean; source: string; base_url: string; model: string | null; latency_ms: number | null; reply: string | null; error: string | null }>('/api/ai/check', { method: 'POST', ai: true }),
+}
+
+// ---------------------------------------------------------------------------
+// 题目答疑
+// ---------------------------------------------------------------------------
+
+export interface HomeworkRecord { id: string; course_id: string; data: Record<string, unknown>; version: number; updated_at: string }
+export interface HomeworkTopic { key: string; title: string }
+export interface HomeworkContext { course_title: string; question: string; reference: string; topics: HomeworkTopic[]; learner_memory: string }
+export type HomeworkTurn = { role: 'answer' | 'check' | 'hint' | 'attempt' | 'feedback' | 'solution'; text: string }
+export type MistakeKindValue = 'concept' | 'start' | 'calc' | 'careless'
+export interface HomeworkCheck { verdict: 'correct' | 'partial' | 'wrong'; kind: MistakeKindValue | null; where: string; why: string; answer: string; solution: string; hint: string; topic_key: string | null }
+export interface HomeworkGuide { feedback: string; on_track: boolean | null; hint: string; done: boolean; topic_key: string | null }
+export interface HomeworkConclusion { idea: string; method: string; stuck: string; kind: MistakeKindValue | null; solved: boolean; topic_key: string | null }
+
+export const homeworkApi = {
+  list: (courseId: string) => apiFetch<HomeworkRecord[]>(`/api/homework?course_id=${encodeURIComponent(courseId)}`),
+  save: (id: string, courseId: string, data: Record<string, unknown>, version: number) =>
+    apiFetch<HomeworkRecord>(`/api/homework/${encodeURIComponent(id)}`, { method: 'PUT', json: { course_id: courseId, data, version } }),
+  remove: (id: string) => apiFetch<void>(`/api/homework/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  read: (uploadIds: string[], part: 'question' | 'answer') =>
+    apiFetch<{ text: string; pages: Record<string, number> }>('/api/homework/read', { ai: true, json: { upload_ids: uploadIds, part } }),
+  check: (context: HomeworkContext, answer: string, history: HomeworkTurn[]) =>
+    apiFetch<HomeworkCheck>('/api/homework/check', { ai: true, json: { ...context, answer, history } }),
+  guide: (context: HomeworkContext, history: HomeworkTurn[], attempt: string) =>
+    apiFetch<HomeworkGuide>('/api/homework/guide', { ai: true, json: { ...context, history, attempt } }),
+  solve: (context: HomeworkContext) => apiFetch<{ solution: string; answer: string }>('/api/homework/solve', { ai: true, json: context }),
+  conclude: (context: HomeworkContext, history: HomeworkTurn[], sawSolution: boolean) =>
+    apiFetch<HomeworkConclusion>('/api/homework/conclude', { ai: true, json: { ...context, history, saw_solution: sawSolution } }),
+  pagePath: (uploadId: string, page = 1, width = 900) => `/api/uploads/${encodeURIComponent(uploadId)}/page?page=${page}&width=${width}`,
 }
