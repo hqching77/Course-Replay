@@ -25,6 +25,8 @@ export interface PracticeTopic {
   content: string
   pastQuestions?: string[]
   mistakes?: string[]
+  /** 知识档案 text for the AI (what the student knows / finds hard in all courses). */
+  memory?: string
 }
 
 /**
@@ -43,7 +45,7 @@ export function PracticeDialog({ topic, onClose, onResult }: { topic: PracticeTo
 
   useEffect(() => {
     let active = true
-    practiceApi.problems({ topic: topic.title, content: topic.content, count: 3, past_questions: topic.pastQuestions?.slice(0, 5), mistakes: topic.mistakes?.slice(-5) })
+    practiceApi.problems({ topic: topic.title, content: topic.content, count: 3, past_questions: topic.pastQuestions?.slice(0, 5), mistakes: topic.mistakes?.slice(-5), learner_memory: topic.memory })
       .then((payload) => { if (active) setProblems(payload.problems) })
       .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : t('出题失败')) })
     return () => { active = false }

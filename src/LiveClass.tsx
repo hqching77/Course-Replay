@@ -8,6 +8,7 @@ import { ClassQuestion, Course, normalizeMarkdown } from './data'
 import { t, useLang } from './i18n'
 import { useLive, useStartLiveClass } from './live'
 import { Markdown, NotFound, PageHeader, updateSection } from './ui'
+import { learnerMemory } from './memory'
 
 type Props = { courses: Course[]; setCourses: Dispatch<SetStateAction<Course[]>>; notify: (message: string) => void }
 
@@ -100,6 +101,7 @@ export function LiveClass({ courses, setCourses, notify }: Props) {
           key_concepts: current?.analysis?.key_concepts || [],
           recent: history.filter((item) => item.status === 'answered').slice(-3).map((item) => ({ question: item.question, answer: item.answer })),
           transcript: transcriptText(current?.transcript, 3000),
+          learner_memory: learnerMemory(course.id, `${current?.title || section.title}\n${question}`),
         },
       })
       patchQuestion(id, { status: 'answered', answer: payload.answer, answeredAt: Date.now() })

@@ -167,6 +167,8 @@ class StudyAskRequest(BaseModel):
     allow_new_dialog: bool = True
     # The lecture text of the knowledge point on screen, so answers match what the student is reading.
     current_content: str = Field(default="", max_length=8000)
+    # 知识档案 across all of the student's courses (built in the browser; prompt only).
+    learner_memory: str = Field(default="", max_length=4000)
 
 
 class StudyAskResponse(BaseModel):
@@ -198,6 +200,7 @@ class ClassAskRequest(BaseModel):
     recent: list[ClassAskTurn] = Field(default_factory=list, max_length=6)
     # Last few minutes of the live transcript, so answers follow what the teacher just said.
     transcript: str = Field(default="", max_length=8000)
+    learner_memory: str = Field(default="", max_length=4000)
 
 
 class ClassAskResponse(BaseModel):

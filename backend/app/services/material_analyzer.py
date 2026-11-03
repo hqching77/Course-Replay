@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from app.schemas import AnalysisKnowledgeNode, CourseMaterialAnalysis
+from app.services.learner import learner_note
 from app.services.ai_provider import AIProvider
 from app.services.visual_processor import PreparedVisualDocument
 
@@ -215,6 +216,7 @@ async def analyze_materials(
     transcript: str = "",
     language: str = "zh",
     *,
+    learner_memory: str = "",
     max_pages_per_request: int = 40,
     pages_per_batch: int = 20,
     concurrency: int = 3,
@@ -225,6 +227,7 @@ async def analyze_materials(
         intro += _class_questions_note(class_questions)
     if transcript.strip():
         intro += _transcript_note(transcript.strip())
+    intro += learner_note(learner_memory, "notes")
     if language == "en":
         intro += (
             "\n\nIMPORTANT: Write ALL output in English — title, summary, learning_path, key_concepts, "

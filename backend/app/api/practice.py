@@ -23,6 +23,7 @@ from app.models import UploadedFile, User
 from app.providers import effective_settings, language_rule, reply_language
 from app.security import require_ai_access
 from app.services.ai_provider import AIProvider
+from app.services.learner import learner_note
 from app.services.visual_processor import VisualProcessingError, prepare_visual_document
 
 router = APIRouter(tags=["practice"])
@@ -207,6 +208,7 @@ class ProblemsRequest(BaseModel):
     count: int = Field(default=3, ge=1, le=5)
     past_questions: list[str] = Field(default_factory=list, max_length=5)
     mistakes: list[str] = Field(default_factory=list, max_length=5)
+    learner_memory: str = Field(default="", max_length=4000)
 
 
 class Problem(BaseModel):
@@ -239,7 +241,7 @@ async def practice_problems(payload: ProblemsRequest, request: Request, _user: U
         extra += "\n\n往年考题（参考题型）：\n" + "\n".join(f"- {item[:600]}" for item in payload.past_questions)
     if payload.mistakes:
         extra += "\n\n学生以前错在：\n" + "\n".join(f"- {item[:300]}" for item in payload.mistakes)
-    raw = await _ask(request, PROBLEMS_PROMPT.format(n=payload.count), f"知识点：{payload.topic}\n\n讲稿：\n{payload.content[:6000]}{extra}", max_tokens=3000)
+    raw = await _ask(request, PROBLEMS_PROMPT.format(n=payload.count) + learner_note(payload.learner_memory, "practice"), f"知识点：{payload.topic}\n\n讲稿：\n{payload.content[:6000]}{extra}", max_tokens=3000)
     problems: list[Problem] = []
     for tag, _, text in parse_blocks(raw):
         if tag == "PROBLEM" and text:

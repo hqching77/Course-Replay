@@ -11,6 +11,37 @@ export interface SectionStudy {
   lastAt?: number
   /** Seconds spent in 课堂重放 per local day (YYYY-MM-DD). */
   review?: Record<string, number>
+  /** Marked answers per knowledge point (all sources); '__section' when no point matched. */
+  answers?: Record<string, NodeAnswers>
+}
+
+export interface NodeAnswers {
+  right: number
+  wrong: number
+  lastAt: number
+  lastRight: boolean
+  /** What the student said about it (我会了 / 我还不会); cleared by the next marked answer. */
+  self?: 'known' | 'unknown'
+}
+
+export const SECTION_KEY = '__section'
+
+/** Count one marked answer for a knowledge point. 'unknown' = "I don't know this". */
+export function tallyAnswer(section: Section, nodeId: string | undefined, verdict: 'correct' | 'partial' | 'wrong' | 'unknown', now = Date.now()): Section {
+  const study = section.study || {}
+  const key = nodeId || SECTION_KEY
+  const before = study.answers?.[key] || { right: 0, wrong: 0, lastAt: 0, lastRight: false }
+  const right = verdict === 'correct'
+  const entry: NodeAnswers = { right: before.right + (right ? 1 : 0), wrong: before.wrong + (right ? 0 : 1), lastAt: now, lastRight: right, ...(verdict === 'unknown' ? { self: 'unknown' as const } : {}) }
+  return { ...section, study: { ...study, answers: { ...(study.answers || {}), [key]: entry } } }
+}
+
+/** 我会了 / 我还不会 for one knowledge point. */
+export function declareSelf(section: Section, nodeId: string | undefined, self: 'known' | 'unknown', now = Date.now()): Section {
+  const study = section.study || {}
+  const key = nodeId || SECTION_KEY
+  const before = study.answers?.[key] || { right: 0, wrong: 0, lastAt: 0, lastRight: false }
+  return { ...section, study: { ...study, answers: { ...(study.answers || {}), [key]: { ...before, lastAt: now, self } } } }
 }
 
 const DAY = 86_400_000

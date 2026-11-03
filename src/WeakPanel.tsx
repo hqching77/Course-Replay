@@ -3,6 +3,7 @@ import { Dispatch, SetStateAction, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Course } from './data'
 import { nodeContent, recordAnswer } from './exam'
+import { learnerMemory } from './memory'
 import { t, useLang } from './i18n'
 import { Markdown } from './ui'
 import { PracticeDialog, PracticeTopic } from './Practice'
@@ -28,7 +29,7 @@ export function WeakPanel({ course, setCourses }: { course: Course; setCourses: 
     const section = course.sections.find((item) => item.id === point.sectionId)
     const content = nodeContent(section, point.nodeId) || point.topic
     const pastQuestions = (course.exam?.pastQuestions || []).filter((question) => point.nodeId && question.topicKey === `${point.sectionId}:${point.nodeId}`).map((question) => question.text)
-    setPractice({ point, topic: { title: point.topic, content, pastQuestions, mistakes: point.evidence.map((item) => item.note || item.question) } })
+    setPractice({ point, topic: { title: point.topic, content, pastQuestions, mistakes: point.evidence.map((item) => item.note || item.question), memory: learnerMemory(course.id, point.topic) } })
   }
 
   const row = (point: WeakPoint) => {

@@ -4,6 +4,7 @@ import type { Course, Material, Section } from './data'
 import { transcriptText } from './classNotes'
 import { formatDate, t } from './i18n'
 import { updateSection } from './ui'
+import { learnerMemory } from './memory'
 
 type SetCourses = Dispatch<SetStateAction<Course[]>>
 
@@ -83,6 +84,8 @@ export async function startSectionBuild(setCourses: SetCourses, course: Course, 
   if (transcript) form.append('transcript', transcript)
   const asked = (section.classQuestions || []).map((item) => item.question.trim()).filter(Boolean)
   if (asked.length) form.append('class_questions', JSON.stringify(asked))
+  const memory = learnerMemory(course.id, [section.title, ...included.map((material) => material.name)].join('\n'))
+  if (memory) form.append('learner_memory', memory)
 
   updateSection(setCourses, course.id, section.id, (current) => ({
     ...current,

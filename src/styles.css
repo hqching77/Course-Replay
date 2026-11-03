@@ -798,3 +798,51 @@ button.semester-row svg { color: #68717f; transition: transform .2s ease; }
 .weak-note { max-height: 3.2em; overflow: hidden; margin-top: 2px; }
 .weak-note .markdown-body.on-dark { font-size: 11.5px; line-height: 1.55; color: #9aa4b0; }
 .weak-note .markdown-body.on-dark p { margin: 0; }
+
+/* 知识档案: cross-course memory */
+@media (max-width: 680px) { .nav-main { grid-template-columns: repeat(5, 1fr); } .nav-item span { font-size: 10px; } }
+.related-strip { width: min(820px, 100%); margin: 14px auto 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 11px 14px; border: 1px solid #2b3a44; border-radius: 10px; background: #111820; color: #8fb6cc; font-size: 11.5px; }
+.related-strip > span { font-weight: 600; }
+.related-strip a { display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 9px; border: 1px solid #2f4350; border-radius: 7px; background: #142029; color: #d6e6ef; font-size: 12px; }
+.related-strip a:hover { border-color: #4b6a7d; }
+.related-strip a small { color: #7f97a6; font-size: 10.5px; }
+.ai-memory-link { color: #8fb6cc; text-decoration: underline dotted; text-underline-offset: 2px; }
+.elsewhere { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 99px; background: #142029; border: 1px solid #2b3a44; color: #9cc0d4; font-size: 10.5px; font-style: normal; }
+.level-chip .elsewhere { margin-left: 2px; }
+.quiz-top .elsewhere { align-self: flex-start; }
+.knowledge-overview { margin-bottom: 8px; }
+.knowledge-links { padding: 6px 16px; }
+.knowledge-link { display: grid; grid-template-columns: 70px minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid #20272f; color: #6f8a99; }
+.knowledge-link:first-child { border-top: 0; }
+.knowledge-link em { font-style: normal; color: #9cc0d4; font-weight: 700; font-size: 13px; }
+.knowledge-link a { min-width: 0; display: flex; align-items: center; gap: 6px; color: #e3e8ee; font-size: 12.5px; }
+.knowledge-link a span { color: #7a8491; flex: none; }
+.knowledge-link a i { font-style: normal; flex: none; }
+.knowledge-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.knowledge-toolbar .mode-switch button { font-size: 11.5px; }
+.knowledge-search { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 11px; border: 1px solid #2c343e; border-radius: 8px; background: #0f1318; color: #7a8491; min-width: 240px; }
+.knowledge-search input { flex: 1; border: 0; background: transparent; color: #e8edf3; outline: none; font-size: 12.5px; }
+.knowledge-course { padding: 6px 16px 8px; margin-bottom: 12px; }
+.knowledge-course-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 0 8px; }
+.knowledge-course-head a { color: #f1f4f7; font-weight: 700; font-size: 14px; }
+.knowledge-course-head span { color: #727c88; font-size: 11px; }
+.knowledge-row { display: grid; grid-template-columns: 82px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid #20272f; }
+.knowledge-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.knowledge-text strong { color: #eef2f6; font-size: 13px; }
+.knowledge-text small { color: #77818d; font-size: 11px; }
+.knowledge-actions { display: flex; gap: 6px; }
+.knowledge-level { justify-self: start; display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 10.5px; font-weight: 600; white-space: nowrap; }
+.knowledge-level.mastered { background: #1d2a17; color: var(--lime); }
+.knowledge-level.known { background: #17251f; color: #8fe0b0; }
+.knowledge-level.shaky { background: #352c1c; color: #eebc66; }
+.knowledge-level.weak { background: #38201b; color: #ff9573; }
+.knowledge-level.studied { background: #20262e; color: #aab3bf; }
+.knowledge-prompt { margin: 10px 0 0; padding: 14px 16px; max-height: 360px; overflow: auto; white-space: pre-wrap; border: 1px solid var(--line); border-radius: 10px; background: #0f1318; color: #b5bdc9; font: 12px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; }
+@media (max-width: 680px) {
+  .knowledge-row { grid-template-columns: 1fr; gap: 6px; }
+  .knowledge-actions { flex-wrap: wrap; }
+  .knowledge-link { grid-template-columns: 1fr; gap: 4px; }
+  .knowledge-link > svg { display: none; }
+  .knowledge-search { min-width: 0; width: 100%; }
+  .knowledge-toolbar .mode-switch { overflow-x: auto; max-width: 100%; }
+}

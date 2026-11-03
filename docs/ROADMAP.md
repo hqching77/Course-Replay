@@ -153,6 +153,18 @@ The chapter structure also gives 考前冲刺 its scope ("期中范围：第 1�
 
 All AI output uses the `@@TAG` text format rather than JSON, so LaTeX can't break parsing.
 
+### 知识档案 (one record across all courses)
+
+- **What's recorded:** every marked answer is counted per knowledge point (`section.study.answers`: right / wrong / last result), together with 我会了 / 我还不会. Nothing else is new; the record is computed from these counts, weak points, the exam check and what was read in 课堂重放.
+- **Levels:** 已掌握 / 答对过 / 不太稳 / 薄弱 / 学过、未测. The newest information wins: what you said, then weak points, then the exam check, then answer counts.
+- **Who reads it:** a short text version is sent with every AI request that teaches or sets problems: AI 讲师, the in-class assistant, targeted practice and note generation (`learner_memory`). It's only used inside the prompt and isn't stored on the server. The current course is described in detail, every other course briefly, plus points from other courses that look related to what's on screen.
+- **Finding the same idea in another course:** no AI. Two titles share a meaningful term (e.g. 矩阵 in 《程序设计》二维数组与矩阵运算 and 《线性代数》矩阵乘法), with generic words like 概念 / 应用 ignored. The AI gets the related points and decides whether they really connect.
+- **Where you see it:**
+  - the `/knowledge` page (知识档案): every point in every course, cross-course links, 我会了 / 我还不会, and the exact text the AI reads;
+  - 其他课程里学过 under a note in 课堂重放;
+  - links in the exam diagnosis and plan.
+- **New exam plans start from the record:** mastered points are skipped and weak points start as 不会.
+
 ## Order
 
 | Phase | When | What |

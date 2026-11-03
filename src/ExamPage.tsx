@@ -1,9 +1,10 @@
-import { ArrowLeft, BookOpen, CalendarClock, CheckCircle2, CircleAlert, Dumbbell, FileUp, RefreshCw, Sparkles, Star, Trash2 } from 'lucide-react'
+import { ArrowLeft, ArrowLeftRight, BookOpen, CalendarClock, CheckCircle2, CircleAlert, Dumbbell, FileUp, RefreshCw, Sparkles, Star, Trash2 } from 'lucide-react'
 import { Dispatch, FormEvent, SetStateAction, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { QuizQuestion, filesApi, practiceApi } from './api'
 import { Course } from './data'
-import { ExamPlan, ExamTopic, TopicInfo, TopicLevel, buildPlan, createPlan, daysUntil, emphasisByNode, nodeContent, recordAnswer, syncTopics, topicInfo } from './exam'
+import { ExamPlan, ExamTopic, TopicInfo, TopicLevel, buildPlan, createPlan, daysUntil, declareKnowledge, emphasisByNode, nodeContent, recordAnswer, syncTopics, topicInfo } from './exam'
+import { Related, knowledgeEntries, learnerMemory, levelLabel as knowledgeLabel, relatedElsewhere, seedLevels } from './memory'
 import { t, useLang } from './i18n'
 import { PracticeDialog, PracticeTopic } from './Practice'
 import { dayKey, sectionNodes } from './study'
@@ -43,7 +44,13 @@ function Setup({ course, plan, onSave, onCancel }: { course: Course; plan?: Exam
 }
 
 /** Quick diagnosis: a few multiple-choice questions per knowledge point; known topics are then skipped. */
-function Diagnosis({ course, plan, setCourses, notify }: { course: Course; plan: ExamPlan } & Omit<Props, 'courses'>) {
+function Elsewhere({ related }: { related?: Related }) {
+  if (!related) return null
+  const { entry } = related
+  return <span className="elsewhere" title={t('其他课程里的同类知识点（按标题里相同的词「{term}」找到）', { term: related.term })}><ArrowLeftRight size={10} />{t('《{course}》{title} · {level}', { course: entry.courseTitle, title: entry.title, level: knowledgeLabel(entry.level) })}</span>
+}
+
+function Diagnosis({ course, plan, setCourses, notify, related }: { course: Course; plan: ExamPlan; related: (title: string) => Related | undefined } & Omit<Props, 'courses'>) {
   const [running, setRunning] = useState<{ sectionId: string; questions: QuizQuestion[]; index: number; picked: number | null; tally: Record<string, { right: number; total: number }> } | null>(null)
   const [loading, setLoading] = useState('')
   const sections = course.sections.filter((section) => plan.sectionIds.includes(section.id))
@@ -101,6 +108,7 @@ function Diagnosis({ course, plan, setCourses, notify }: { course: Course; plan:
     const key = question.key
     const topic = topicOf(key)
     setLevel([key], level)
+    if (topic && level === 'known') updateCourse(setCourses, course.id, (current) => declareKnowledge(current, topic.sectionId, topic.nodeId, 'known'))
     if (topic && level === 'unknown') updateCourse(setCourses, course.id, (current) => recordAnswer(current, { sectionId: topic.sectionId, nodeId: topic.nodeId, topic: topic.title, verdict: 'unknown', source: 'diagnosis', question: question.question, note: t('诊断时选了「我不会」') }))
     // Drop this topic's current and remaining questions; the answered ones before it stay in the count.
     const questions = running.questions.filter((item, index) => index < running.index || item.key !== key)
@@ -117,7 +125,7 @@ function Diagnosis({ course, plan, setCourses, notify }: { course: Course; plan:
   if (running && question) {
     const topic = topicOf(question.key)
     return <section className="panel quiz-card">
-      <div className="quiz-top"><span className="eyebrow">{t('诊断 · 第 {i} / {n} 题', { i: running.index + 1, n: running.questions.length })}</span><strong>{topic?.title}</strong></div>
+      <div className="quiz-top"><span className="eyebrow">{t('诊断 · 第 {i} / {n} 题', { i: running.index + 1, n: running.questions.length })}</span><strong>{topic?.title}</strong>{topic && <Elsewhere related={related(topic.title)} />}</div>
       <div className="quiz-question"><Markdown className="on-dark practice-md">{question.question}</Markdown></div>
       <div className="quiz-options">{question.options.map((option, index) => <button key={index} disabled={running.picked !== null} onClick={() => pick(index)} className={running.picked === null ? '' : index === question.answer ? 'correct' : index === running.picked ? 'wrong' : ''}><span>{'ABCD'[index]}</span><Markdown className="on-dark practice-md">{option}</Markdown></button>)}</div>
       {running.picked !== null && <div className={`quiz-feedback ${running.picked === question.answer ? 'correct' : 'wrong'}`}>{running.picked === question.answer ? <CheckCircle2 size={15} /> : <CircleAlert size={15} />}<Markdown className="on-dark practice-md">{`${running.picked === question.answer ? t('答对了') : t('答错了')}${question.explanation ? `：${question.explanation}` : ''}`}</Markdown></div>}
@@ -131,25 +139,25 @@ function Diagnosis({ course, plan, setCourses, notify }: { course: Course; plan:
   }
 
   return <div className="diagnosis">
-    <p className="field-hint">{t('每个知识点 2 道选择题：都对 = 已掌握（计划里跳过），对一道 = 不太稳，都错 = 不会。会的就点「我很熟，跳过」，不会的直接点「我不会这个」，省时间。')} {t('已诊断 {done} / {total} 个知识点', { done: diagnosed, total: plan.topics.length })}</p>
+    <p className="field-hint">{t('每个知识点 2 道选择题：都对 = 已掌握（计划里跳过），对一道 = 不太稳，都错 = 不会。会的就点「我很熟，跳过」，不会的直接点「我不会这个」，省时间。')} {t('已诊断 {done} / {total} 个知识点', { done: diagnosed, total: plan.topics.length })} {t('知识档案里已有结论的（已掌握 / 薄弱）创建计划时会直接带进来。')}</p>
     {sections.map((section) => {
       const topics = topicsOf(section.id)
       const pending = topics.filter((topic) => !topic.level).length
       return <section className="panel diagnosis-section" key={section.id}>
         <div className="diagnosis-head"><strong>{section.title}</strong><span>{pending ? t('还有 {n} 个没诊断', { n: pending }) : t('已全部诊断')}</span>
           <button className="button secondary compact" disabled={!pending || Boolean(loading)} onClick={() => void start(section.id)}>{loading === section.id ? <RefreshCw className="spin-icon" size={14} /> : <Sparkles size={14} />}{loading === section.id ? t('出题中…') : t('开始诊断')}</button></div>
-        <div className="diagnosis-topics">{topics.map((topic) => <span key={topic.key} className={`level-chip ${topic.level || 'none'}`} title={levelLabel(topic.level)}>{topic.title}<em>{levelLabel(topic.level)}</em></span>)}</div>
+        <div className="diagnosis-topics">{topics.map((topic) => <span key={topic.key} className={`level-chip ${topic.level || 'none'}`} title={levelLabel(topic.level)}>{topic.title}<em>{levelLabel(topic.level)}</em>{!topic.level && <Elsewhere related={related(topic.title)} />}</span>)}</div>
       </section>
     })}
   </div>
 }
 
-function PlanView({ course, plan, onPractice }: { course: Course; plan: ExamPlan; onPractice: (info: TopicInfo) => void }) {
+function PlanView({ course, plan, onPractice, related }: { course: Course; plan: ExamPlan; onPractice: (info: TopicInfo) => void; related: (title: string) => Related | undefined }) {
   const result = useMemo(() => buildPlan(course, plan), [course, plan])
   const [showMastered, setShowMastered] = useState(false)
   const block = (info: TopicInfo) => <div className="plan-block" key={info.topic.key}>
     <div className="plan-block-main"><strong>{info.topic.title}</strong><small>{info.section.title} · {t('{n} 分钟', { n: info.minutes })}</small>
-      <div className="plan-tags">{info.tags.map((tag) => <span key={tag} className={tag === t('老师强调过') ? 'stressed' : ''}>{tag === t('老师强调过') && <Star size={10} />}{tag}</span>)}</div></div>
+      <div className="plan-tags">{info.tags.map((tag) => <span key={tag} className={tag === t('老师强调过') ? 'stressed' : ''}>{tag === t('老师强调过') && <Star size={10} />}{tag}</span>)}<Elsewhere related={related(info.topic.title)} /></div></div>
     <div className="plan-block-actions">
       <Link className="button ghost compact" to={`/courses/${course.id}/sections/${info.topic.sectionId}/replay`} state={{ focus: info.topic.nodeId }}><BookOpen size={14} />{t('读笔记')}</Link>
       <button className="button secondary compact" onClick={() => onPractice(info)}><Dumbbell size={14} />{t('练 3 题')}</button>
@@ -219,12 +227,14 @@ export function ExamPage({ courses, setCourses, notify }: Props) {
   const [tab, setTab] = useState<'diagnosis' | 'plan' | 'past'>('plan')
   const [editing, setEditing] = useState(false)
   const [practice, setPractice] = useState<{ info: TopicInfo; topic: PracticeTopic } | null>(null)
+  const entries = useMemo(() => knowledgeEntries(courses), [courses])
   if (!course) return <NotFound />
+  const related = (title: string) => relatedElsewhere(entries, course.id, title, 1)[0]
   const plan = course.exam ? { ...course.exam, topics: syncTopics(course.exam, course) } : undefined
 
   const save = (input: { name: string; date: string; sectionIds: string[]; minutesPerDay: number }) => {
     updateCourse(setCourses, course.id, (current) => {
-      if (!current.exam) return { ...current, exam: createPlan(current, input) }
+      if (!current.exam) return { ...current, exam: seedLevels(createPlan(current, input), current) }
       const updated: ExamPlan = { ...current.exam, ...input }
       return { ...current, exam: { ...updated, topics: syncTopics(updated, current) } }
     })
@@ -236,7 +246,7 @@ export function ExamPage({ courses, setCourses, notify }: Props) {
     const content = nodeContent(info.section, info.topic.nodeId)
     const weak = (course.weakPoints || []).find((item) => item.sectionId === info.topic.sectionId && item.nodeId === info.topic.nodeId)
     const pastQuestions = (plan?.pastQuestions || []).filter((question) => question.topicKey === info.topic.key).map((question) => question.text)
-    setPractice({ info, topic: { title: info.topic.title, content, pastQuestions, mistakes: weak?.evidence.map((item) => item.note || item.question) } })
+    setPractice({ info, topic: { title: info.topic.title, content, pastQuestions, mistakes: weak?.evidence.map((item) => item.note || item.question), memory: learnerMemory(course.id, info.topic.title) } })
   }
 
   const header = <><div className="back-row"><Link to={`/courses/${course.id}`}><ArrowLeft size={16} />{course.title}</Link><span>/</span><span>{t('考前冲刺')}</span></div></>
@@ -262,8 +272,8 @@ export function ExamPage({ courses, setCourses, notify }: Props) {
       <button role="tab" aria-selected={tab === 'plan'} className={tab === 'plan' ? 'active' : ''} onClick={() => setTab('plan')}>{t('2 · 每日计划')}</button>
       <button role="tab" aria-selected={tab === 'past'} className={tab === 'past' ? 'active' : ''} onClick={() => setTab('past')}>{t('往年试卷')}{(plan.pastQuestions || []).length > 0 && <em>{plan.pastQuestions!.length}</em>}</button>
     </div>
-    {tab === 'diagnosis' && <Diagnosis course={{ ...course, exam: plan }} plan={plan} setCourses={setCourses} notify={notify} />}
-    {tab === 'plan' && <PlanView course={course} plan={plan} onPractice={openPractice} />}
+    {tab === 'diagnosis' && <Diagnosis course={{ ...course, exam: plan }} plan={plan} setCourses={setCourses} notify={notify} related={related} />}
+    {tab === 'plan' && <PlanView course={course} plan={plan} onPractice={openPractice} related={related} />}
     {tab === 'past' && <PastPapers course={course} plan={plan} setCourses={setCourses} notify={notify} />}
     {practice && <PracticeDialog topic={practice.topic} onClose={() => setPractice(null)} onResult={(result, question) => updateCourse(setCourses, course.id, (current) => recordAnswer(current.exam ? { ...current, exam: { ...current.exam, topics: syncTopics(current.exam, current) } } : current, {
       sectionId: practice.info.topic.sectionId, nodeId: practice.info.topic.nodeId, topic: practice.info.topic.title, verdict: result.verdict, kind: result.kind, source: 'practice', question, note: result.feedback,

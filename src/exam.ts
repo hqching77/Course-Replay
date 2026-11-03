@@ -1,7 +1,7 @@
 import type { Course, KnowledgeTier, Section } from './data'
 import { getLang, t } from './i18n'
-import { dayKey, sectionNodes } from './study'
-import { AnswerResult, applyResult } from './weak'
+import { dayKey, declareSelf, sectionNodes, tallyAnswer } from './study'
+import { AnswerResult, applyResult, markMastered } from './weak'
 
 /**
  * 考前冲刺: what to revise, in what order, day by day. Everything is computed from the
@@ -214,6 +214,7 @@ export function buildPlan(course: Course, plan: ExamPlan, now = new Date()) {
 /** One marked answer → weak-point record, and the exam topic's progress if it is in the plan. */
 export function recordAnswer(course: Course, result: AnswerResult): Course {
   let next = applyResult(course, result)
+  if (result.sectionId) next = { ...next, sections: next.sections.map((section) => section.id === result.sectionId ? tallyAnswer(section, result.nodeId, result.verdict) : section) }
   if (next.exam && result.sectionId && result.nodeId && result.source === 'practice') {
     const key = topicKey(result.sectionId, result.nodeId)
     next = { ...next, exam: { ...next.exam, topics: next.exam.topics.map((topic) => {
@@ -232,3 +233,18 @@ export function nodeContent(section: Section | undefined, nodeId: string | undef
   if (!section || !nodeId) return ''
   return sectionNodes(section).find((node) => node.id === nodeId)?.content || ''
 }
+
+/** 我会了 / 我还不会 from the student: noted on the point, and reflected in weak points and the exam plan. */
+export function declareKnowledge(course: Course, sectionId: string, nodeId: string | undefined, self: 'known' | 'unknown'): Course {
+  let next: Course = { ...course, sections: course.sections.map((section) => section.id === sectionId ? declareSelf(section, nodeId, self) : section) }
+  if (self === 'known') {
+    const point = (next.weakPoints || []).find((item) => item.sectionId === sectionId && item.nodeId === nodeId && item.status !== 'mastered')
+    if (point) next = markMastered(next, point.id)
+  }
+  if (next.exam && nodeId) {
+    const key = topicKey(sectionId, nodeId)
+    next = { ...next, exam: { ...next.exam, topics: next.exam.topics.map((topic) => topic.key === key ? { ...topic, level: self === 'known' ? 'known' : 'unknown' } : topic) } }
+  }
+  return next
+}
+

@@ -141,7 +141,7 @@ export const practiceApi = {
     apiFetch<{ questions: QuizQuestion[] }>('/api/practice/quiz', { ai: true, json: { course_title: courseTitle, topics, per_topic: perTopic } }),
   grade: (payload: { question: string; answer: string; topic?: string; reference?: string }) =>
     apiFetch<GradeResult>('/api/practice/grade', { ai: true, json: payload }),
-  problems: (payload: { topic: string; content?: string; count?: number; past_questions?: string[]; mistakes?: string[] }) =>
+  problems: (payload: { topic: string; content?: string; count?: number; past_questions?: string[]; mistakes?: string[]; learner_memory?: string }) =>
     apiFetch<{ problems: PracticeProblem[] }>('/api/practice/problems', { ai: true, json: payload }),
   pastPaper: (uploadIds: string[], topics: TopicPayload[]) =>
     apiFetch<{ questions: { text: string; topic_key: string | null }[] }>('/api/practice/past-paper', { ai: true, json: { upload_ids: uploadIds, topics } }),

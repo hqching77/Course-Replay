@@ -39,6 +39,7 @@ from app.services.visual_processor import (
 )
 from app.crypto import decrypt_text, encrypt_text
 from app.providers import effective_settings, language_rule, reply_language, stt_config, transcribe_audio
+from app.services.learner import MAX_MEMORY_CHARS, learner_note
 from app.security import get_optional_user, require_ai_access, require_stt_access
 
 
@@ -143,6 +144,7 @@ async def _run_visual_job(
     ai_settings: Settings | None = None,
     transcript: str = "",
     language: str = "zh",
+    learner_memory: str = "",
 ) -> None:
     settings = get_settings()
     ai_settings = ai_settings or settings
@@ -193,6 +195,7 @@ async def _run_visual_job(
             class_questions=class_questions,
             transcript=transcript,
             language=language,
+            learner_memory=learner_memory,
             max_pages_per_request=settings.max_pages_per_ai_request,
             pages_per_batch=settings.pages_per_batch,
             concurrency=settings.ai_batch_concurrency,
@@ -280,6 +283,7 @@ async def start_visual_processing(
     upload_ids: str | None = Form(default=None),
     transcript: str | None = Form(default=None),
     class_questions: str | None = Form(default=None),
+    learner_memory: str | None = Form(default=None),
     user: User | None = Depends(require_ai_access),
     db: Session = Depends(get_db),
 ) -> VisualJobStartResponse:
@@ -339,6 +343,7 @@ async def start_visual_processing(
         ai_settings=ai_settings,
         transcript=transcript_text,
         language=reply_language(request),
+        learner_memory=(learner_memory or "")[:MAX_MEMORY_CHARS],
     ))
     return VisualJobStartResponse(job_id=job_id)
 
@@ -450,6 +455,7 @@ answer 字段内的段落之间保留空行，步骤或并列要点使用有序�
 仅仅是从当前知识点自然延伸、追问课程相关概念时不要开启新对话。当 new_dialog 为 true 时，add_node 必须为 false。
 当 allow_new_dialog 为 false 时，new_dialog 必须为 false。
 current_content 是学生此刻正在看的讲稿内容，回答要与它一致、可以引用其中的例子。"""
+    system_prompt += learner_note(request.learner_memory, "tutor")
     system_prompt += language_rule(reply_language(http_request))
     context = {
         "course_title": request.course_title,
@@ -530,7 +536,7 @@ async def ask_in_class(
         context_lines.append(f"关键概念：{'、'.join(request.key_concepts)}")
     if request.transcript.strip():
         context_lines.append(f"老师最近讲的内容（语音转写，可能有错字）：\n{request.transcript.strip()[-4000:]}")
-    system = f"{CLASS_ASK_PROMPT}\n\n" + "\n".join(context_lines) + language_rule(reply_language(http_request))
+    system = f"{CLASS_ASK_PROMPT}\n\n" + "\n".join(context_lines) + learner_note(request.learner_memory, "tutor") + language_rule(reply_language(http_request))
     messages: list[dict[str, str]] = [{"role": "system", "content": system}]
     for turn in request.recent[-4:]:
         if turn.question.strip() and turn.answer.strip():

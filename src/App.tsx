@@ -1,8 +1,10 @@
 import { Dispatch, FormEvent, ReactNode, SetStateAction, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft,
+  ArrowLeftRight,
   ArrowRight,
   BookOpen,
+  BookOpenCheck,
   Bot,
   BrainCircuit,
   CalendarClock,
@@ -59,7 +61,9 @@ import { useCourseStore } from './workspace'
 import { SearchDialog, TRANSCRIPT_NODE_ID, openSearch } from './Search'
 import { ImportPage } from './ImportPage'
 import { ExamPage } from './ExamPage'
+import { KnowledgePage } from './KnowledgePage'
 import { matchNode, recordAnswer } from './exam'
+import { knowledgeEntries, learnerMemory, levelLabel as knowledgeLabel, publishCourses, relatedElsewhere } from './memory'
 import { GradeView } from './Practice'
 import { WeakPanel, updateCourse } from './WeakPanel'
 import { connectSemesterSync, disconnectSemesterSync, isCustomSemester, semesterName, semesterWeek, useSemester } from './semester'
@@ -123,6 +127,8 @@ function Workspace({ controls }: { controls: SessionControls }) {
   const { session } = controls
   const store = useCourseStore(session, controls.expire)
   const { courses, setCourses } = store
+  // Every AI request reads the 知识档案 from all courses, not just the one on screen.
+  publishCourses(courses)
   const accountUser = session.status === 'account' ? session.user : null
   useEffect(() => {
     if (accountUser) connectSemesterSync((semester) => authApi.savePreferences({ semester }), accountUser.preferences?.semester)
@@ -168,6 +174,7 @@ function Workspace({ controls }: { controls: SessionControls }) {
             <Route path="/courses/:courseId" element={<CourseSections {...page} />} />
             <Route path="/courses/:courseId/import" element={<ImportPage {...page} />} />
             <Route path="/courses/:courseId/exam" element={<ExamPage {...page} />} />
+            <Route path="/knowledge" element={<KnowledgePage courses={courses} setCourses={setCourses} />} />
             <Route path="/courses/:courseId/sections/:sectionId" element={<SectionDetail {...page} />} />
             <Route path="/courses/:courseId/sections/:sectionId/live" element={<LiveClass {...page} />} />
             <Route path="/courses/:courseId/sections/:sectionId/replay" element={<Replay {...page} />} />
@@ -197,7 +204,7 @@ function Sidebar({ account }: { account: AccountView }) {
   // Which area the page belongs to: course pages count as 课程空间, not 课堂重放.
   const area = path === '/live' || /\/live$/.test(path) ? 'live'
     : path === '/replay' || /\/replay$/.test(path) ? 'replay'
-      : path.startsWith('/settings') ? 'settings' : 'home'
+      : path.startsWith('/settings') ? 'settings' : path.startsWith('/knowledge') ? 'knowledge' : 'home'
   // 上课中: back to the class that's running, otherwise pick a course and start.
   const listening = live.state.status !== 'idle' && live.state.courseId && live.state.sectionId
   const liveTo = listening ? `/courses/${live.state.courseId}/sections/${live.state.sectionId}/live` : '/live'
@@ -211,6 +218,7 @@ function Sidebar({ account }: { account: AccountView }) {
         <NavItem to="/" active={area === 'home'} icon={<LayoutDashboard size={18} />} label={t('课程空间')} />
         <NavItem to={liveTo} active={area === 'live'} icon={<Radio size={18} />} label={t('上课中')} badge={listening ? <span className="live-dot nav-live-dot" /> : undefined} />
         <NavItem to={courseId && sectionId ? `/courses/${courseId}/sections/${sectionId}/replay` : '/replay'} active={area === 'replay'} icon={<BrainCircuit size={18} />} label={t('课堂重放')} />
+        <NavItem to="/knowledge" active={area === 'knowledge'} icon={<BookOpenCheck size={18} />} label={t('知识档案')} />
         <NavItem to="/settings" active={area === 'settings'} icon={<UserRound size={18} />} label={t('我的')} className="mobile-only" />
       </nav>
       <div className="sidebar-label">{t('当前学期')}</div>
@@ -856,6 +864,7 @@ function Replay({ courses, setCourses, notify }: PageProps) {
     return []
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [section?.knowledgeMap, section?.analysis, lang])
+  const allKnowledge = useMemo(() => knowledgeEntries(courses), [courses])
   const orderedNodes = useMemo(() => TIER_ORDER.flatMap((tier) => kmNodes.filter((node) => node.tier === tier)), [kmNodes])
   const grouped = useMemo(() => TIER_ORDER.map((tier) => ({ tier, nodes: kmNodes.filter((node) => node.tier === tier) })).filter((group) => group.nodes.length), [kmNodes])
   const explorationNodes = section?.explorationNodes || []
@@ -908,6 +917,8 @@ function Replay({ courses, setCourses, notify }: PageProps) {
   const activeTier = activeKnowledge?.tier || (classTitle ? 'class' : undefined)
   const tierLabel = activeKnowledge ? t(TIER_META[activeKnowledge.tier].label) : activeExploration ? t('探索支线') : classTitle ? t('上课记录') : t('知识节点')
   const tierEyebrow = activeKnowledge ? t(TIER_META[activeKnowledge.tier].eyebrow) : classTitle ? t('IN-CLASS · 上课中') : 'EXPLORATION'
+  // Same idea in another course (e.g. 矩阵 here and in 线性代数): shown under the note, and the AI is told too.
+  const elsewhere = activeKnowledge ? relatedElsewhere(allKnowledge, course.id, activeKnowledge.title, 3) : []
   const studiedIds = new Set(section.study?.studied || [])
   const studiedCount = orderedNodes.filter((node) => studiedIds.has(node.id)).length
   const progressPct = orderedNodes.length ? Math.max(4, (studiedCount / orderedNodes.length) * 100) : 0
@@ -956,6 +967,7 @@ function Replay({ courses, setCourses, notify }: PageProps) {
           course_title: `${course.title} · ${section.title}`,
           current_topic: currentTitle,
           current_content: activeContent.slice(0, 6000),
+          learner_memory: learnerMemory(course.id, `${currentTitle}\n${question}`),
           summary: section.analysis?.summary || course.description,
           learning_path: section.analysis?.learning_path || kmNodes.map((node) => node.title),
           key_concepts: section.analysis?.key_concepts || course.tags,
@@ -1031,13 +1043,14 @@ function Replay({ courses, setCourses, notify }: PageProps) {
             <div className="reading-index"><span>{classTitle ? 'Q' : String(Math.max(activeIndex, 0) + 1).padStart(2, '0')}</span><em>{tierEyebrow} · {classTitle ? t('课后笔记') : t('学习路径')}</em></div>
             <Markdown>{activeContent}</Markdown>
           </article>
+          {elsewhere.length > 0 && <div className="related-strip"><ArrowLeftRight size={15} /><span>{t('其他课程里学过')}</span>{elsewhere.map(({ entry }) => <Link key={entry.key} to={`/courses/${entry.courseId}/sections/${entry.sectionId}/replay`} state={{ focus: entry.nodeId }} title={t('《{course}》· {section}', { course: entry.courseTitle, section: entry.sectionTitle })}>{entry.title}<small>《{entry.courseTitle}》· {knowledgeLabel(entry.level)}</small></Link>)}</div>}
         </div>
         <div className="source-strip"><LinkIcon size={15} /><span>{t('材料依据')}</span>{section.materials.length ? section.materials.map((material) => material.previewUrl ? <button key={material.id} title={t('查看文档')} onClick={() => openMaterial(material)}>{material.name}</button> : <span className="source-chip" key={material.id}>{material.name}</span>) : <Link to={`/courses/${course.id}/sections/${section.id}`}>{transcript.length ? t('来自课堂转写 · 去上传课件') : t('暂无材料 · 去上传')}</Link>}</div>
         {orderedNodes.length > 0 && <div className="content-nav"><button className="button ghost" onClick={() => activeIndex > 0 && setSelected(orderedNodes[activeIndex - 1].id)} disabled={activeIndex <= 0}><ArrowLeft size={16} />{t('上一步')}</button><span>{t('步骤 {i} / {n}', { i: Math.max(activeIndex + 1, 1), n: orderedNodes.length })}</span><button className="button dark" onClick={() => activeIndex > -1 && activeIndex < orderedNodes.length - 1 && setSelected(orderedNodes[activeIndex + 1].id)} disabled={activeIndex < 0 || activeIndex >= orderedNodes.length - 1}>{t('继续：{title}', { title: orderedNodes[activeIndex + 1]?.title || t('已到终点') })} <ArrowRight size={16} /></button></div>}
       </section>
 
       <aside className="ai-column">
-        <div className="ai-head"><div><span className="ai-avatar"><Bot size={19} /></span><div><strong>{t('AI 讲师')}</strong><small><span className="online-dot" />{section.analysis ? t('基于本小节 {n} 份材料', { n: section.materials.filter((item) => item.status === 'ready').length }) : t('本小节还没有笔记')}</small></div></div>
+        <div className="ai-head"><div><span className="ai-avatar"><Bot size={19} /></span><div><strong>{t('AI 讲师')}</strong><small><span className="online-dot" />{section.analysis ? t('基于本小节 {n} 份材料', { n: section.materials.filter((item) => item.status === 'ready').length }) : t('本小节还没有笔记')}{allKnowledge.length > 0 && <> · <Link className="ai-memory-link" to="/knowledge" title={t('AI 会参考你在所有课程里的知识档案')}>{t('参考知识档案')}</Link></>}</small></div></div>
           <div className="material-menu-wrap"><button className="icon-button tiny" aria-label={t('对话操作')} aria-expanded={chatMenu} onClick={() => setChatMenu((value) => !value)}><MoreHorizontal size={17} /></button>
             {chatMenu && <div className="material-menu" onMouseLeave={() => setChatMenu(false)}><button className="delete" disabled={!chatHistory.length} onClick={() => { setChatMenu(false); if (window.confirm(t('清空和 AI 讲师的对话？左侧由提问长出的支线会保留。'))) updateSection(setCourses, course.id, section.id, (current) => ({ ...current, chatHistory: [] })) }}><Trash2 size={14} />{t('清空对话')}</button></div>}
           </div></div>
