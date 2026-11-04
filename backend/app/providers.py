@@ -121,6 +121,27 @@ def clean_transcript(text: str) -> str:
     return text
 
 
+NOT_AN_API = "这个接口地址返回的是网页，不是 API：请检查接口地址（通常以 /v1 结尾），并确认这家服务提供这项功能"
+
+
+def looks_like_webpage(text: str) -> bool:
+    """Some gateways answer unknown paths with their website (HTTP 200) instead of an error."""
+    head = text.lstrip()[:200].lower()
+    return head.startswith("<!doctype html") or head.startswith("<html") or "<head>" in head
+
+
+def chat_audio_model(model: str) -> bool:
+    """Chat models that take audio as input (no /audio/transcriptions endpoint): transcribe via chat."""
+    lowered = model.lower()
+    return any(word in lowered for word in ("gemini", "omni", "audio-preview", "gpt-audio"))
+
+
+CHAT_TRANSCRIBE_PROMPT = (
+    "Transcribe this audio verbatim, in the language that is spoken. Output only the transcript text: "
+    "no quotes, no explanations, no timestamps. If nobody is speaking, output nothing."
+)
+
+
 def _supports_whisper_params(model: str) -> bool:
     lowered = model.lower()
     return "whisper" in lowered or "transcribe" in lowered
@@ -174,6 +195,9 @@ async def transcribe_audio(
             extra["prompt"] = prompt[-200:]
     started = time.perf_counter()
     try:
+        if chat_audio_model(config.model):
+            text = await _transcribe_with_chat(client, config.model, audio, filename, prompt)
+            return clean_transcript(text), round((time.perf_counter() - started) * 1000)
         result = await client.audio.transcriptions.create(
             model=config.model,
             file=(filename, audio, content_type),
@@ -188,4 +212,24 @@ async def transcribe_audio(
         raise RuntimeError(f"语音识别接口返回 HTTP {exc.status_code}：{api_error_detail(exc)}" + (f"。{hint}" if hint else "")) from exc
     latency = round((time.perf_counter() - started) * 1000)
     text = getattr(result, "text", None) if not isinstance(result, str) else result
+    if looks_like_webpage(str(text or "")):
+        raise RuntimeError(NOT_AN_API)
     return clean_transcript(str(text or "")), latency
+
+
+async def _transcribe_with_chat(client: AsyncOpenAI, model: str, audio: bytes, filename: str, prompt: str | None) -> str:
+    import base64
+
+    audio_format = "mp3" if filename.lower().endswith(".mp3") else "wav"
+    instruction = CHAT_TRANSCRIBE_PROMPT + (f" Context (what was said just before): {prompt[-200:]}" if prompt else "")
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": [
+            {"type": "text", "text": instruction},
+            {"type": "input_audio", "input_audio": {"data": base64.b64encode(audio).decode("ascii"), "format": audio_format}},
+        ]}],  # type: ignore[list-item]
+        temperature=0,
+    )
+    if isinstance(response, str):
+        raise RuntimeError(NOT_AN_API if looks_like_webpage(response) else "语音识别接口返回的格式不对")
+    return (response.choices[0].message.content or "").strip()

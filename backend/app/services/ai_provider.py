@@ -9,6 +9,14 @@ class AIConfigurationError(RuntimeError):
     pass
 
 
+def _check_response(response: Any) -> None:
+    """The SDK hands back plain text when the reply isn't JSON — e.g. a gateway's website at a wrong path."""
+    if isinstance(response, str):
+        from app.providers import NOT_AN_API, looks_like_webpage
+
+        raise RuntimeError(NOT_AN_API if looks_like_webpage(response) else "AI 服务返回的格式不对，请检查接口地址")
+
+
 class AIProvider:
     """OpenAI-compatible boundary used by Course Replay AI services."""
 
@@ -61,6 +69,7 @@ class AIProvider:
             )
         except (APIConnectionError, APITimeoutError, APIStatusError) as exc:
             self._raise_friendly_error(exc)
+        _check_response(response)
         return response.choices[0].message.content or ""
 
     async def analyze_visual_materials(
@@ -83,5 +92,6 @@ class AIProvider:
             )
         except (APIConnectionError, APITimeoutError, APIStatusError) as exc:
             self._raise_friendly_error(exc)
+        _check_response(response)
         usage = response.usage.model_dump() if response.usage else None
         return response.choices[0].message.content or "", usage

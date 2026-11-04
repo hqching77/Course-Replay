@@ -375,7 +375,7 @@ export const EN: Record<string, string> = {
   "任何 OpenAI 兼容接口；生成笔记需要模型支持图片输入": "Any OpenAI-compatible API; building notes needs a model that accepts images",
   "上课中实时把老师讲的话转成文字": "Turns what the teacher says into text during Live class",
   "默认：硅基流动 SenseVoiceSmall（免费，国内可用）": "Default: SiliconFlow SenseVoiceSmall (free, works in mainland China)",
-  "硅基流动、Groq Whisper（$0.04/小时）、OpenAI 等": "SiliconFlow, Groq Whisper ($0.04/hour), OpenAI and more",
+  "硅基流动、Groq Whisper（$0.04/小时）、OpenAI、Gemini 等": "SiliconFlow, Groq Whisper ($0.04/hour), OpenAI, Gemini and more",
   "浏览器内置": "Built into the browser",
   "免费、实时；Chrome 需要能访问 Google，国内网络通常不可用": "Free and live; Chrome needs Google to be reachable, which usually fails in mainland China",
   "这个浏览器不支持": "Not supported in this browser",
@@ -804,4 +804,7 @@ export const EN: Record<string, string> = {
   "问问这个想法对不对，或者问一个概念": "Ask whether this idea is right, or ask about a concept",
   "问一问": "Ask",
   "输入题目，也可以粘贴截图、拍照或上传图片 / PDF": "Type the question, or paste a screenshot, take a photo or upload an image / PDF",
+  "这个接口地址返回的是网页，不是 API：请检查接口地址（通常以 /v1 结尾），并确认这家服务提供这项功能": "This address returned a web page, not an API — check the address (it usually ends in /v1) and that the service offers this feature",
+  "语音识别接口返回的格式不对": "The speech-to-text service returned an unexpected format",
+  "AI 服务返回的格式不对，请检查接口地址": "The AI service returned an unexpected format — check the address",
 }
