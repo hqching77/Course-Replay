@@ -789,6 +789,8 @@ export const EN: Record<string, string> = {
   "问一问": "Ask",
   "这个接口地址返回的是网页，不是 API：请检查接口地址（通常以 /v1 结尾），并确认这家服务提供这项功能": "This address returned a web page, not an API — check the address (it usually ends in /v1) and that the service offers this feature",
   "语音识别接口返回的格式不对": "The speech-to-text service returned an unexpected format",
+  "模型没有收到录音：这个接口不会把音频转给模型。请换成 Gemini 官方地址（或它的反代地址），或换一家支持音频输入的服务商": "The model didn't receive the recording: this service doesn't pass audio on to the model. Use Google's Gemini address (or a proxy of it), or a provider that supports audio input",
+  "模型拒绝处理这段录音": "The model refused to process this recording",
   "AI 服务返回的格式不对，请检查接口地址": "The AI service returned an unexpected format — check the address",
   "移除": "Remove",
   "截图.png": "Screenshot.png",
