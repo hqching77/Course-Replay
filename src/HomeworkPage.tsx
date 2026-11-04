@@ -1,11 +1,11 @@
-import { ArrowLeft, BookOpen, Bot, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert, Eye, FileUp, Flag, Lightbulb, ListChecks, MessageCircleQuestion, PenLine, Plus, RefreshCw, Smartphone, Sparkles, Trash2, X } from 'lucide-react'
+import { ArrowLeft, BookOpen, Bot, Camera, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Cloud, Eye, FileText, FileUp, Flag, Folder, Lightbulb, ListChecks, MessageCircleQuestion, PenLine, Plus, RefreshCw, Smartphone, Sparkles, Trash2, X } from 'lucide-react'
 import QRCode from 'qrcode'
-import { Dispatch, ReactNode, SetStateAction, useEffect, useRef, useState } from 'react'
+import { Dispatch, SetStateAction, useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
-import { HomeworkCheck, filesApi, homeworkApi, protectedBlobUrl } from './api'
+import { CloudListing, HomeworkCheck, cloudApi, filesApi, homeworkApi, protectedBlobUrl } from './api'
 import { Course } from './data'
 import { recordAnswer } from './exam'
-import { HwImage, HwItem, HwStep, createItem, historyOf, homeworkContext, itemStatus, lastCheck, newId, shrinkImage, statusLabel, titleFrom, topicOf, useHomework } from './homework'
+import { HwImage, HwItem, HwStep, createItem, historyOf, homeworkContext, itemStatus, itemTitle, lastCheck, newId, shrinkImage, statusLabel, titleFor, topicOf, useHomework } from './homework'
 import { t, useLang } from './i18n'
 import { Markdown, NotFound, PageHeader } from './ui'
 import { updateCourse } from './WeakPanel'
@@ -14,11 +14,18 @@ import { kindLabel } from './weak'
 type SetCourses = Dispatch<SetStateAction<Course[]>>
 type Props = { courses: Course[]; setCourses: SetCourses; notify: (message: string) => void; account: boolean }
 type Store = ReturnType<typeof useHomework>
+type Draft = { text: string; images: HwImage[] }
+type Update = (change: (item: HwItem) => HwItem, debounce?: number) => Promise<void>
 
 const LAST_COURSE = 'course-replay-homework-course'
+const CLOUD_LINK = 'course-replay-cloud-link'
+const EMPTY: Draft = { text: '', images: [] }
 /** Student working is written one step per line; keep those line breaks (but leave $$…$$ blocks alone). */
 const keepLines = (text: string) => text.split(/(\$\$[\s\S]*?\$\$)/).map((part) => part.startsWith('$$') ? part : part.replace(/([^\n])\n(?!\n)/g, '$1  \n')).join('')
 const verdictText = (verdict: HomeworkCheck['verdict']) => ({ correct: t('正确'), partial: t('部分正确'), wrong: t('错误') }[verdict])
+const isPicture = (name: string) => /\.(pdf|png|jpe?g|webp|heic|heif)$/i.test(name)
+const isUploadable = (file: File) => file.type.startsWith('image/') || file.type === 'application/pdf' || /\.(pdf|png|jpe?g|webp|heic|heif)$/i.test(file.name)
+const aborted = (error: unknown) => error instanceof DOMException && error.name === 'AbortError'
 
 /** /homework: open 题目答疑 for the course used last (or the first one). */
 export function HomeworkHome({ courses }: { courses: Course[] }) {
@@ -31,7 +38,7 @@ export function HomeworkHome({ courses }: { courses: Course[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// Photos and PDFs (question or answer)
+// Pictures and files
 // ---------------------------------------------------------------------------
 
 function PageImage({ uploadId, page = 1, width = 900, alt }: { uploadId: string; page?: number; width?: number; alt: string }) {
@@ -75,113 +82,218 @@ function ImageViewer({ image, onClose }: { image: HwImage; onClose: () => void }
   </div>
 }
 
+/** Small thumbnails (a message's pictures); files that aren't pictures show as a name. */
 function ImageStrip({ images, onRemove }: { images: HwImage[]; onRemove?: (id: string) => void }) {
   const [open, setOpen] = useState<HwImage | null>(null)
   if (!images.length) return null
   return <div className="hw-images">
     {images.map((image) => <div className="hw-image" key={image.id}>
-      <button type="button" className="hw-image-open" title={t('查看原图')} onClick={() => setOpen(image)}><PageImage uploadId={image.id} width={240} alt={image.name} /></button>
-      {onRemove && <button type="button" className="hw-image-remove" aria-label={t('移除这张图')} title={t('移除这张图')} onClick={() => onRemove(image.id)}><X size={12} /></button>}
+      {isPicture(image.name)
+        ? <button type="button" className="hw-image-open" title={t('查看原图')} onClick={() => setOpen(image)}><PageImage uploadId={image.id} width={240} alt={image.name} /></button>
+        : <span className="hw-file-chip"><FileText size={15} />{image.name}</span>}
+      {onRemove && <button type="button" className="hw-image-remove" aria-label={t('移除')} title={t('移除')} onClick={() => onRemove(image.id)}><X size={12} /></button>}
     </div>)}
     {open && <ImageViewer image={open} onClose={() => setOpen(null)} />}
   </div>
 }
 
-type Draft = { text: string; images: HwImage[] }
-const isUploadable = (file: File) => file.type.startsWith('image/') || file.type === 'application/pdf' || /\.(pdf|png|jpe?g|webp|heic|heif)$/i.test(file.name)
+/** The question itself: shown large, since it's what the student reads (no copied text). */
+function QuestionPictures({ images, onRemove }: { images: HwImage[]; onRemove?: (id: string) => void }) {
+  const [open, setOpen] = useState<HwImage | null>(null)
+  return <div className="hw-question-pictures">
+    {images.map((image) => <figure key={image.id}>
+      {isPicture(image.name)
+        ? <button type="button" className="hw-question-picture" title={t('查看原图')} onClick={() => setOpen(image)}><PageImage uploadId={image.id} width={1100} alt={image.name} /></button>
+        : <span className="hw-file-chip"><FileText size={15} />{image.name}</span>}
+      <figcaption>{image.name}{image.pages > 1 ? ` · ${t('{n} 页', { n: image.pages })}` : ''}</figcaption>
+      {onRemove && <button type="button" className="hw-image-remove" aria-label={t('移除')} title={t('移除')} onClick={() => onRemove(image.id)}><X size={12} /></button>}
+    </figure>)}
+    {open && <ImageViewer image={open} onClose={() => setOpen(null)} />}
+  </div>
+}
 
-/**
- * Text + pictures in one box: type, take a photo, upload, paste a screenshot (Ctrl/⌘+V) or drop a file.
- * Pictures are uploaded, then the AI copies what's in them into the text so the student can check and edit it.
- */
-function InputBox({ part, account, notify, value, onChange, placeholder, label, rows = 6, disabled }: {
-  part: 'question' | 'answer'; account: boolean; notify: (message: string) => void; value: Draft; onChange: (value: Draft) => void; placeholder: string; label: string; rows?: number; disabled?: boolean
-}) {
-  const camera = useRef<HTMLInputElement>(null)
-  const picker = useRef<HTMLInputElement>(null)
-  const latest = useRef(value)
-  latest.current = value
-  const [busy, setBusy] = useState('')
-  const [preview, setPreview] = useState(false)
-  const [dragging, setDragging] = useState(false)
-
-  const upload = async (list: File[]) => {
+/** Upload pictures / PDFs (photos are made smaller first). Nothing is read here; the server reads them when asked. */
+function useAttach(account: boolean, notify: (message: string) => void) {
+  const [busy, setBusy] = useState(false)
+  const attach = async (list: File[]): Promise<HwImage[]> => {
     const files = list.filter(isUploadable).slice(0, 8)
-    if (!files.length) return
-    if (!account) { notify(t('登录后可以拍照或上传图片。')); return }
+    if (!files.length) return []
+    if (!account) { notify(t('登录后可以拍照或上传图片。')); return [] }
+    setBusy(true)
     try {
-      setBusy(t('正在上传…'))
-      const uploaded: HwImage[] = []
+      const added: HwImage[] = []
       for (const file of files) {
-        const ready = await shrinkImage(file)
-        const stored = await filesApi.upload(ready)
-        uploaded.push({ id: stored.id, name: file.name, pages: 1 })
+        const stored = await filesApi.upload(await shrinkImage(file))
+        added.push({ id: stored.id, name: file.name === 'image.png' ? t('截图.png') : file.name, pages: stored.pages || 1 })
       }
-      setBusy(part === 'question' ? t('AI 正在抄题…') : t('AI 正在读图…'))
-      let text = ''
-      try {
-        const read = await homeworkApi.read(uploaded.map((image) => image.id), part)
-        text = read.text
-        uploaded.forEach((image) => { image.pages = read.pages[image.id] || 1 })
-      } catch (error) {
-        notify(error instanceof Error ? t('图片已保存，但没读出文字：{error}', { error: error.message }) : t('没读出文字'))
-      }
-      const current = latest.current
-      onChange({ images: [...current.images, ...uploaded], text: [current.text.trim(), text].filter(Boolean).join('\n\n') })
-      setPreview(false)
+      return added
     } catch (error) {
       notify(error instanceof Error ? error.message : t('上传失败'))
+      return []
     } finally {
-      setBusy('')
+      setBusy(false)
     }
   }
-  const locked = disabled || Boolean(busy)
+  return { busy, attach }
+}
 
+function AttachButtons({ onFiles, onCloud, disabled }: { onFiles: (files: File[]) => void; onCloud?: () => void; disabled?: boolean }) {
+  const camera = useRef<HTMLInputElement>(null)
+  const picker = useRef<HTMLInputElement>(null)
+  return <div className="hw-upload">
+    <button type="button" className="icon-text" disabled={disabled} onClick={() => camera.current?.click()}><Camera size={15} />{t('拍照')}</button>
+    <button type="button" className="icon-text" disabled={disabled} onClick={() => picker.current?.click()}><FileUp size={15} />{t('上传图片 / PDF')}</button>
+    {onCloud && <button type="button" className="icon-text" disabled={disabled} onClick={onCloud}><Cloud size={15} />{t('从网盘选择')}</button>}
+    <input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={(event) => { onFiles(Array.from(event.target.files || [])); event.target.value = '' }} />
+    <input ref={picker} type="file" accept="image/*,.pdf,.heic,.heif" multiple hidden onChange={(event) => { onFiles(Array.from(event.target.files || [])); event.target.value = '' }} />
+  </div>
+}
+
+const SUPPORTED_CLOUD = /\.(pdf|png|jpe?g|webp|pptx?|docx?|odt|odp|md|markdown|txt)$/i
+const formatSize = (bytes: number | null) => bytes == null ? '' : bytes > 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
+
+/** Pick files from a cloud-drive share link (the link is remembered per course in this browser). */
+function CloudPicker({ courseId, onAdd, onClose, notify }: { courseId: string; onAdd: (images: HwImage[]) => void; onClose: () => void; notify: (message: string) => void }) {
+  const storageKey = `${CLOUD_LINK}:${courseId}`
+  const [link, setLink] = useState(() => { try { return localStorage.getItem(storageKey) || localStorage.getItem(CLOUD_LINK) || '' } catch { return '' } })
+  const [listing, setListing] = useState<CloudListing | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [adding, setAdding] = useState('')
+  const [added, setAdded] = useState<string[]>([])
+  const open = async (path = '') => {
+    if (!link.trim()) return
+    setLoading(true)
+    setError('')
+    try {
+      setListing(await cloudApi.list(link.trim(), path))
+      try { localStorage.setItem(storageKey, link.trim()); localStorage.setItem(CLOUD_LINK, link.trim()) } catch { /* ignore */ }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : t('打不开这个链接'))
+    } finally {
+      setLoading(false)
+    }
+  }
+  useEffect(() => { if (link) void open() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const add = async (path: string, name: string) => {
+    setAdding(path)
+    try {
+      const stored = await cloudApi.import(link.trim(), path)
+      onAdd([{ id: stored.id, name: stored.filename || name, pages: stored.pages || 1 }])
+      setAdded((current) => [...current, path])
+    } catch (caught) {
+      notify(caught instanceof Error ? caught.message : t('下载失败'))
+    } finally {
+      setAdding('')
+    }
+  }
+  const crumbs = listing && listing.kind === 'dir' ? listing.path.split('/').filter(Boolean) : []
+  return <div className="modal-backdrop" onMouseDown={onClose}>
+    <div className="modal hw-cloud" role="dialog" aria-label={t('从网盘选择')} onMouseDown={(event) => event.stopPropagation()}>
+      <div className="modal-head"><div><span className="eyebrow">{t('网盘')}</span><h2>{t('从网盘选择')}</h2></div><button type="button" className="icon-button" aria-label={t('关闭')} onClick={onClose}><X size={18} /></button></div>
+      <form className="hw-cloud-link" onSubmit={(event) => { event.preventDefault(); void open() }}>
+        <input value={link} onChange={(event) => setLink(event.target.value)} placeholder={t('粘贴网盘的共享链接')} aria-label={t('共享链接')} spellCheck={false} />
+        <button className="button secondary compact" disabled={!link.trim() || loading}>{loading ? <RefreshCw className="spin-icon" size={14} /> : <Folder size={14} />}{t('打开')}</button>
+      </form>
+      {error && <p className="hw-cloud-error">{error}</p>}
+      {listing && <>
+        {listing.kind === 'dir' && <div className="hw-cloud-crumbs">
+          <button type="button" onClick={() => void open('/')}>{t('全部文件')}</button>
+          {crumbs.map((part, index) => <span key={index}><ChevronRight size={12} /><button type="button" onClick={() => void open('/' + crumbs.slice(0, index + 1).join('/'))}>{part}</button></span>)}
+        </div>}
+        <div className="hw-cloud-list">
+          {!listing.entries.length && <p className="field-hint">{t('这个文件夹是空的')}</p>}
+          {listing.entries.map((entry) => {
+            const done = added.includes(entry.path)
+            const supported = entry.is_dir || SUPPORTED_CLOUD.test(entry.name)
+            return entry.is_dir
+              ? <button type="button" key={entry.path} className="hw-cloud-row folder" onClick={() => void open(entry.path)}><Folder size={16} /><span>{entry.name}</span><ChevronRight size={14} /></button>
+              : <div key={entry.path} className={`hw-cloud-row ${supported ? '' : 'unsupported'}`}><FileText size={16} /><span>{entry.name}</span><small>{formatSize(entry.size)}</small>
+                <button type="button" className={`button compact ${done ? 'ghost' : 'secondary'}`} disabled={!supported || done || Boolean(adding)} onClick={() => void add(entry.path, entry.name)}>
+                  {adding === entry.path ? <RefreshCw className="spin-icon" size={13} /> : done ? <Check size={13} /> : <Plus size={13} />}{done ? t('已添加') : supported ? t('添加') : t('不支持')}</button></div>
+          })}
+        </div>
+      </>}
+      <div className="modal-actions"><button type="button" className="button primary" onClick={onClose}>{t('完成')}</button></div>
+    </div>
+  </div>
+}
+
+/** What the student writes: their question or their working, with pictures (paste, drop, photo, upload). */
+function MessageBox({ courseId, value, onChange, placeholder, account, notify, disabled }: { courseId: string; value: Draft; onChange: (value: Draft) => void; placeholder: string; account: boolean; notify: (message: string) => void; disabled?: boolean }) {
+  const latest = useRef(value)
+  latest.current = value
+  const [preview, setPreview] = useState(false)
+  const [dragging, setDragging] = useState(false)
+  const [cloud, setCloud] = useState(false)
+  const { busy, attach } = useAttach(account, notify)
+  const addImages = (added: HwImage[]) => { if (added.length) onChange({ ...latest.current, images: [...latest.current.images, ...added] }) }
+  const addFiles = async (files: File[]) => addImages(await attach(files))
   return <div className={`hw-input ${dragging ? 'dragging' : ''}`}
     onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); setDragging(true) } }}
     onDragLeave={() => setDragging(false)}
-    onDrop={(event) => { setDragging(false); if (event.dataTransfer.files.length) { event.preventDefault(); void upload(Array.from(event.dataTransfer.files)) } }}>
+    onDrop={(event) => { setDragging(false); if (event.dataTransfer.files.length) { event.preventDefault(); void addFiles(Array.from(event.dataTransfer.files)) } }}>
     <div className="hw-input-bar">
-      <div className="hw-text-tabs" role="tablist" aria-label={label}>
+      <div className="hw-text-tabs" role="tablist">
         <button type="button" role="tab" aria-selected={!preview} className={preview ? '' : 'active'} onClick={() => setPreview(false)}><PenLine size={13} />{t('编辑')}</button>
         <button type="button" role="tab" aria-selected={preview} className={preview ? 'active' : ''} onClick={() => setPreview(true)} disabled={!value.text.trim()}><Eye size={13} />{t('预览公式')}</button>
       </div>
-      {account && <div className="hw-upload">
-        <button type="button" className="icon-text" disabled={locked} onClick={() => camera.current?.click()}><Camera size={15} />{t('拍照')}</button>
-        <button type="button" className="icon-text" disabled={locked} onClick={() => picker.current?.click()}><FileUp size={15} />{t('上传图片 / PDF')}</button>
-      </div>}
-      <input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={(event) => { void upload(Array.from(event.target.files || [])); event.target.value = '' }} />
-      <input ref={picker} type="file" accept="image/*,.pdf,.heic,.heif" multiple hidden onChange={(event) => { void upload(Array.from(event.target.files || [])); event.target.value = '' }} />
+      {account && <AttachButtons disabled={disabled || busy} onFiles={(files) => void addFiles(files)} onCloud={() => setCloud(true)} />}
     </div>
     <ImageStrip images={value.images} onRemove={(id) => onChange({ ...latest.current, images: latest.current.images.filter((image) => image.id !== id) })} />
     {preview && value.text.trim() ? <div className="hw-preview"><Markdown className="on-dark practice-md">{keepLines(value.text)}</Markdown></div>
-      : <textarea aria-label={label} rows={rows} value={value.text} placeholder={placeholder} disabled={disabled}
+      : <textarea aria-label={placeholder} rows={5} value={value.text} placeholder={placeholder} disabled={disabled}
           onChange={(event) => onChange({ ...latest.current, text: event.target.value })}
           onPaste={(event) => {
             const files = Array.from(event.clipboardData.files).filter(isUploadable)
-            if (files.length) { event.preventDefault(); void upload(files) }
+            if (files.length) { event.preventDefault(); void addFiles(files) }
           }} />}
-    {busy && <div className="hw-busy"><RefreshCw className="spin-icon" size={14} />{busy}</div>}
+    {busy && <div className="hw-busy"><RefreshCw className="spin-icon" size={14} />{t('正在上传…')}</div>}
+    {cloud && <CloudPicker courseId={courseId} notify={notify} onClose={() => setCloud(false)} onAdd={addImages} />}
+  </div>
+}
+
+/** Where the question goes before the first message: paste / drop a screenshot, take a photo, upload or pick from the cloud drive. */
+function QuestionDrop({ course, images, onChange, account, notify }: { course: Course; images: HwImage[]; onChange: (images: HwImage[]) => void; account: boolean; notify: (message: string) => void }) {
+  const latest = useRef(images)
+  latest.current = images
+  const [dragging, setDragging] = useState(false)
+  const [cloud, setCloud] = useState(false)
+  const { busy, attach } = useAttach(account, notify)
+  const addFiles = async (files: File[]) => {
+    const added = await attach(files)
+    if (added.length) onChange([...latest.current, ...added])
+  }
+  return <div tabIndex={0} className={`hw-drop ${dragging ? 'dragging' : ''} ${images.length ? 'filled' : ''}`}
+    onPaste={(event) => { const files = Array.from(event.clipboardData.files).filter(isUploadable); if (files.length) { event.preventDefault(); void addFiles(files) } }}
+    onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); setDragging(true) } }}
+    onDragLeave={() => setDragging(false)}
+    onDrop={(event) => { setDragging(false); if (event.dataTransfer.files.length) { event.preventDefault(); void addFiles(Array.from(event.dataTransfer.files)) } }}>
+    {images.length > 0 && <QuestionPictures images={images} onRemove={(id) => onChange(latest.current.filter((image) => image.id !== id))} />}
+    <div className="hw-drop-bar">
+      {!images.length && <span className="hw-drop-hint">{account ? t('粘贴题目截图（Ctrl/⌘+V），或拖进来') : t('登录后可以上传题目图片；也可以直接在下面打字')}</span>}
+      {account && <AttachButtons disabled={busy} onFiles={(files) => void addFiles(files)} onCloud={() => setCloud(true)} />}
+      {busy && <span className="hw-busy"><RefreshCw className="spin-icon" size={14} />{t('正在上传…')}</span>}
+    </div>
+    {cloud && <CloudPicker courseId={course.id} notify={notify} onClose={() => setCloud(false)} onAdd={(added) => onChange([...latest.current, ...added])} />}
   </div>
 }
 
 function QrPanel({ url }: { url: string }) {
   const [image, setImage] = useState('')
   useEffect(() => { QRCode.toDataURL(url, { margin: 1, width: 200, color: { dark: '#0c0f14', light: '#ffffff' } }).then(setImage).catch(() => setImage('')) }, [url])
-  const local = /^(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(window.location.hostname)
   return <div className="hw-qr">
     {image ? <img src={image} alt={t('打开这道题的二维码')} /> : <span className="mini-spinner" />}
     <div>
       <strong>{t('用手机或平板交答案')}</strong>
       <p>{t('用手机扫码打开这道题（同一个账号），拍照上传后会自动出现在这里。')}</p>
       <code>{url}</code>
-      {local && <p className="hw-qr-warning">{t('手机打不开 localhost 地址：请用电脑的局域网地址或线上地址打开本页，再扫码。')}</p>}
     </div>
   </div>
 }
 
 // ---------------------------------------------------------------------------
-// The conversation
+// The conversation, one exchange at a time (each can be folded)
 // ---------------------------------------------------------------------------
 
 function CheckCard({ check, showSolution }: { check: HomeworkCheck; showSolution?: boolean }) {
@@ -198,7 +310,6 @@ function CheckCard({ check, showSolution }: { check: HomeworkCheck; showSolution
 function StepView({ step, index, steps }: { step: HwStep; index: number; steps: HwStep[] }) {
   if (step.kind === 'answer' || step.kind === 'attempt' || step.kind === 'ask') {
     return <div className="hw-step hw-mine">
-      <span className="hw-step-label">{step.kind === 'answer' ? t('我的解答') : step.kind === 'attempt' ? t('我的尝试') : t('我的问题 / 想法')}</span>
       {step.text && <Markdown className="on-dark practice-md">{keepLines(step.text)}</Markdown>}
       <ImageStrip images={step.images || []} />
     </div>
@@ -221,6 +332,50 @@ function StepView({ step, index, steps }: { step: HwStep; index: number; steps: 
   return <div className="hw-step hw-solution-step"><span className="hw-step-label"><ListChecks size={13} />{t('完整解答')}</span><Markdown className="on-dark practice-md">{step.text}</Markdown></div>
 }
 
+type Exchange = { id: string; mine?: HwStep; replies: HwStep[] }
+const MINE = new Set(['answer', 'attempt', 'ask'])
+
+/** A message and what came back; a hint or solution asked for by button starts its own exchange. */
+function groupSteps(steps: HwStep[]): Exchange[] {
+  const exchanges: Exchange[] = []
+  for (const step of steps) {
+    const current = exchanges[exchanges.length - 1]
+    if (MINE.has(step.kind)) exchanges.push({ id: step.id, mine: step, replies: [] })
+    else if (!current || (current.replies.length && !(step.kind === 'hint' && current.replies[current.replies.length - 1].kind === 'feedback'))) exchanges.push({ id: step.id, replies: [step] })
+    else current.replies.push(step)
+  }
+  return exchanges
+}
+
+function exchangeSummary(exchange: Exchange, steps: HwStep[]) {
+  const first = (exchange.mine?.text || '').replace(/\s+/g, ' ').trim()
+  const label = exchange.mine
+    ? ({ answer: t('我的解答'), attempt: t('我的尝试'), ask: t('我的问题') } as Record<string, string>)[exchange.mine.kind]
+    : exchange.replies[0]?.kind === 'hint' ? t('提示 {n}', { n: steps.slice(0, steps.indexOf(exchange.replies[0]) + 1).filter((item) => item.kind === 'hint').length }) : t('完整解答')
+  const check = exchange.replies.find((step) => step.kind === 'check')?.check
+  const reply = exchange.replies.find((step) => step.kind === 'reply')
+  const feedback = exchange.replies.find((step) => step.kind === 'feedback')
+  const chip = check ? { text: verdictText(check.verdict), tone: check.verdict }
+    : reply?.verdict ? { text: { correct: t('想法对'), partial: t('部分对'), wrong: t('想法有问题') }[reply.verdict], tone: reply.verdict }
+    : feedback ? { text: feedback.onTrack === false ? t('这一步有问题') : t('这一步对了'), tone: feedback.onTrack === false ? 'wrong' : 'correct' }
+    : null
+  const images = exchange.mine?.images?.length || 0
+  return { label, text: first || (images ? t('{n} 张图', { n: images }) : ''), chip }
+}
+
+function ExchangeView({ exchange, steps, open, onToggle }: { exchange: Exchange; steps: HwStep[]; open: boolean; onToggle: () => void }) {
+  const { label, text, chip } = exchangeSummary(exchange, steps)
+  return <section className={`hw-exchange ${open ? 'open' : ''}`}>
+    <button type="button" className="hw-exchange-head" aria-expanded={open} onClick={onToggle}>
+      <ChevronDown size={15} className={open ? '' : 'turned'} />
+      <strong>{label}</strong>
+      {!open && text && <span className="hw-exchange-text">{text}</span>}
+      {chip && <em className={`hw-chip ${chip.tone}`}>{chip.text}</em>}
+    </button>
+    {open && <div className={`hw-exchange-body ${exchange.mine || exchange.replies.length > 1 ? '' : 'solo'}`}>{[exchange.mine, ...exchange.replies].filter(Boolean).map((step) => <StepView key={step!.id} step={step!} index={steps.indexOf(step!)} steps={steps} />)}</div>}
+  </section>
+}
+
 function ConclusionCard({ item, course }: { item: HwItem; course: Course }) {
   const card = item.conclusion!
   const topic = topicOf(course, card.topic_key || item.topicKey)
@@ -235,184 +390,220 @@ function ConclusionCard({ item, course }: { item: HwItem; course: Course }) {
 }
 
 // ---------------------------------------------------------------------------
-// One problem
+// One problem (also used, unsaved, for a new one)
 // ---------------------------------------------------------------------------
 
-function ProblemView({ course, item, store, setCourses, notify, account }: { course: Course; item: HwItem; store: Store } & Omit<Props, 'courses'>) {
-  const navigate = useNavigate()
+function ProblemView({ course, item, update, isNew, onDelete, onSaveOnly, onDiscard, setCourses, notify, account }: {
+  course: Course; item: HwItem; update: Update; isNew?: boolean; onDelete?: () => void; onSaveOnly?: () => void; onDiscard?: () => void
+} & Omit<Props, 'courses'>) {
   const [busy, setBusy] = useState('')
+  const running = useRef<AbortController | null>(null)
   const [editing, setEditing] = useState(false)
   const [questionText, setQuestionText] = useState(item.question.text)
+  const [questionOpen, setQuestionOpen] = useState(true)
+  const [openState, setOpenState] = useState<Record<string, boolean>>({})
   const [showQr, setShowQr] = useState(false)
   const status = itemStatus(item)
   const check = lastCheck(item)
   const finished = Boolean(item.conclusion)
-  const mode = item.mode || 'check'
-  const setMode = (next: 'check' | 'guide') => { if (next !== mode) void store.update(item.id, (current) => ({ ...current, mode: next })) }
   const lastStep = item.steps[item.steps.length - 1]
   const correctNow = item.solved || (lastStep?.kind === 'check' && lastStep.check?.verdict === 'correct')
+  const mode = item.mode || 'check'
+  const exchanges = groupSteps(item.steps)
+  const hasQuestion = Boolean(item.question.images.length || item.question.text.trim())
   const url = `${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, '')}/courses/${course.id}/homework/${item.id}`
 
-  const run = async (label: string, work: () => Promise<void>) => {
+  const run = async (label: string, work: (signal: AbortSignal) => Promise<void>) => {
     if (busy) return
+    const controller = new AbortController()
+    running.current = controller
     setBusy(label)
-    try { await work() } catch (error) { notify(error instanceof Error ? error.message : t('出错了，请重试')) } finally { setBusy('') }
+    try { await work(controller.signal) } catch (error) { if (!aborted(error)) notify(error instanceof Error ? error.message : t('出错了，请重试')) } finally {
+      if (running.current === controller) running.current = null
+      setBusy('')
+    }
   }
   const step = (kind: HwStep['kind'], fields: Partial<HwStep>): HwStep => ({ id: newId('step'), kind, at: Date.now(), text: '', ...fields })
-  const setDraft = (draft: HwItem['draft']) => void store.update(item.id, (current) => ({ ...current, draft }), 800)
-  const draftEmpty = !item.draft.text.trim()
+  const setDraft = (draft: Draft) => void update((current) => ({ ...current, draft }), 800)
+  const setMode = (next: 'check' | 'guide') => { if (next !== mode) void update((current) => ({ ...current, mode: next })) }
+  const draft = item.draft
+  const draftEmpty = !draft.text.trim() && !draft.images.length
+  /** Without a question picture, the first thing typed is the question. */
+  const subjectFor = (message: Draft): HwItem => hasQuestion ? item : { ...item, question: { ...item.question, text: message.text } }
+  const sent = (subject: HwItem, message: Draft, named = '') => (current: HwItem): HwItem => ({
+    ...current, question: subject.question, title: current.title || named || titleFor(subject, message.text), draft: EMPTY,
+  })
 
-  const submitCheck = () => run(t('批改中…'), async () => {
-    if (draftEmpty) throw new Error(t('先写下或上传你的答案'))
-    const answer = item.draft
-    const result = await homeworkApi.check(homeworkContext(course, item), answer.text, historyOf(item))
-    await store.update(item.id, (current) => ({
-      ...current, draft: { text: '', images: [] },
-      steps: [...current.steps, step('answer', { text: answer.text, images: answer.images }), step('check', { check: result })],
+  const submitCheck = () => run(t('批改中…'), async (signal) => {
+    if (draftEmpty) throw new Error(t('先写下或上传你的解答'))
+    const message = draft
+    const subject = subjectFor(message)
+    const result = await homeworkApi.check(homeworkContext(course, subject, message.text), historyOf(subject), message.text, message.images.map((image) => image.id), signal)
+    await update((current) => ({
+      ...sent(subject, message, result.title)(current),
+      steps: [...current.steps, step('answer', { text: message.text, images: message.images, read: result.read }), step('check', { check: result })],
       topicKey: result.topic_key || current.topicKey, solved: current.solved || result.verdict === 'correct',
     }))
   })
 
-  const askHint = () => run(t('想提示中…'), async () => {
-    const result = await homeworkApi.guide(homeworkContext(course, item), historyOf(item), '')
-    await store.update(item.id, (current) => ({ ...current, mode: 'guide', steps: [...current.steps, ...(result.hint ? [step('hint', { text: result.hint })] : [])], topicKey: result.topic_key || current.topicKey }))
+  const askHint = () => run(t('想提示中…'), async (signal) => {
+    // No question yet and something typed: that's the question.
+    const subject = hasQuestion ? item : subjectFor(draft)
+    if (!subject.question.text.trim() && !subject.question.images.length) throw new Error(t('先上传题目，或写下题目'))
+    const result = await homeworkApi.guide(homeworkContext(course, subject), historyOf(subject), '', [], signal)
+    await update((current) => ({
+      ...(hasQuestion ? { ...current, title: current.title || result.title } : sent(subject, draft, result.title)(current)), mode: 'guide',
+      steps: [...current.steps, ...(result.hint ? [step('hint', { text: result.hint })] : [])], topicKey: result.topic_key || current.topicKey,
+    }))
   })
 
-  const submitAttempt = () => run(t('看你这一步…'), async () => {
+  const submitAttempt = () => run(t('看你这一步…'), async (signal) => {
     if (draftEmpty) throw new Error(t('先写下或拍下你这一步'))
-    const attempt = item.draft
-    const result = await homeworkApi.guide(homeworkContext(course, item), historyOf(item), attempt.text)
-    await store.update(item.id, (current) => ({
-      ...current, draft: { text: '', images: [] }, solved: current.solved || result.done,
-      steps: [...current.steps, step('attempt', { text: attempt.text, images: attempt.images }),
+    const message = draft
+    const subject = subjectFor(message)
+    const result = await homeworkApi.guide(homeworkContext(course, subject, message.text), historyOf(subject), message.text, message.images.map((image) => image.id), signal)
+    await update((current) => ({
+      ...sent(subject, message, result.title)(current), solved: current.solved || result.done,
+      steps: [...current.steps, step('attempt', { text: message.text, images: message.images, read: result.read }),
         ...(result.feedback ? [step('feedback', { text: result.feedback, onTrack: result.on_track })] : []),
         ...(result.hint ? [step('hint', { text: result.hint })] : [])],
       topicKey: result.topic_key || current.topicKey,
     }))
   })
 
-  const askQuestion = () => run(t('想一想…'), async () => {
+  const askQuestion = () => run(t('想一想…'), async (signal) => {
     if (draftEmpty) throw new Error(t('先写下你的问题或想法'))
-    const message = item.draft
-    const result = await homeworkApi.ask(homeworkContext(course, item), historyOf(item), message.text)
-    await store.update(item.id, (current) => ({
-      ...current, draft: { text: '', images: [] },
-      steps: [...current.steps, step('ask', { text: message.text, images: message.images }), step('reply', { text: result.reply, verdict: result.verdict })],
+    const message = draft
+    const subject = subjectFor(message)
+    const result = await homeworkApi.ask(homeworkContext(course, subject, message.text), historyOf(subject), message.text, message.images.map((image) => image.id), signal)
+    await update((current) => ({
+      ...sent(subject, message, result.title)(current),
+      steps: [...current.steps, step('ask', { text: message.text, images: message.images, read: result.read }), step('reply', { text: result.reply, verdict: result.verdict })],
       topicKey: result.topic_key || current.topicKey,
     }))
   })
 
-  const showSolution = () => run(t('准备完整解答…'), async () => {
+  const showSolution = () => run(t('准备完整解答…'), async (signal) => {
     // Marking already worked out the full steps: just reveal them.
     if (check?.check?.solution && !check.showSolution) {
-      await store.update(item.id, (current) => ({ ...current, sawSolution: true, steps: current.steps.map((value) => value.id === check.id ? { ...value, showSolution: true } : value) }))
+      const holder = exchanges.find((exchange) => exchange.replies.includes(check))
+      if (holder) setOpenState((current) => ({ ...current, [holder.id]: true }))
+      await update((current) => ({ ...current, sawSolution: true, steps: current.steps.map((value) => value.id === check.id ? { ...value, showSolution: true } : value) }))
       return
     }
-    const result = await homeworkApi.solve(homeworkContext(course, item))
-    await store.update(item.id, (current) => ({ ...current, sawSolution: true, steps: [...current.steps, step('solution', { text: `${result.solution}${result.answer ? `\n\n**${t('最终答案')}：** ${result.answer}` : ''}` })] }))
+    const result = await homeworkApi.solve(homeworkContext(course, item), signal)
+    await update((current) => ({ ...current, sawSolution: true, steps: [...current.steps, step('solution', { text: `${result.solution}${result.answer ? `\n\n**${t('最终答案')}：** ${result.answer}` : ''}` })] }))
   })
 
-  const finish = () => run(t('写总结…'), async () => {
-    const result = await homeworkApi.conclude(homeworkContext(course, item), historyOf(item), item.sawSolution)
+  const finish = () => run(t('写总结…'), async (signal) => {
+    const result = await homeworkApi.conclude(homeworkContext(course, item), historyOf(item), item.sawSolution, signal)
     const topic = topicOf(course, result.topic_key || item.topicKey)
     const verdicts = item.steps.filter((value) => value.kind === 'check').map((value) => value.check!.verdict)
     const verdict = result.solved && !result.kind ? 'correct' : result.solved || verdicts.includes('partial') ? 'partial' : 'wrong'
     updateCourse(setCourses, course.id, (current) => recordAnswer(current, {
-      sectionId: topic?.sectionId, nodeId: topic?.nodeId, topic: topic?.title || item.title, verdict, kind: result.kind || undefined,
-      source: 'homework', question: item.question.text.slice(0, 400), note: result.stuck || undefined,
+      sectionId: topic?.sectionId, nodeId: topic?.nodeId, topic: topic?.title || itemTitle(item), verdict, kind: result.kind || undefined,
+      source: 'homework', question: (item.question.text || itemTitle(item)).slice(0, 400), note: result.stuck || undefined,
     }))
-    await store.update(item.id, (current) => ({ ...current, conclusion: { ...result, at: Date.now() }, topicKey: result.topic_key || current.topicKey }))
+    await update((current) => ({ ...current, conclusion: { ...result, at: Date.now() }, topicKey: result.topic_key || current.topicKey }))
   })
 
+  const cancel = () => {
+    if (busy) { running.current?.abort(); return }
+    if (isNew) { onDiscard?.(); return }
+    setDraft(EMPTY)
+  }
   const saveQuestion = () => {
     if (!questionText.trim()) return
-    void store.update(item.id, (current) => ({ ...current, question: { ...current.question, text: questionText }, title: titleFrom(questionText) }))
+    void update((current) => ({ ...current, question: { ...current.question, text: questionText }, title: titleFor({ ...current, question: { ...current.question, text: questionText } }) }))
     setEditing(false)
   }
-  const removeItem = async () => {
-    if (!window.confirm(t('删除这道题？'))) return
-    await store.remove(item.id).catch((error) => notify(error instanceof Error ? error.message : t('删除失败')))
-    navigate(`/courses/${course.id}/homework`)
-  }
-
+  const isOpen = (exchange: Exchange, index: number) => openState[exchange.id] ?? index >= exchanges.length - 2
   const hints = item.steps.filter((value) => value.kind === 'hint').length
-  const canReveal = mode === 'check' ? Boolean(check?.check?.solution && !check.showSolution) : true
-  const composer: ReactNode = finished ? null : <section className="panel hw-card hw-composer">
-    <div className="hw-card-head">
-      <div className="mode-switch hw-mode" role="tablist" aria-label={t('答疑方式')}>
-        <button type="button" role="tab" aria-selected={mode === 'check'} className={mode === 'check' ? 'active' : ''} onClick={() => setMode('check')}><Check size={14} />{t('批改')}</button>
-        <button type="button" role="tab" aria-selected={mode === 'guide'} className={mode === 'guide' ? 'active' : ''} onClick={() => setMode('guide')}><Lightbulb size={14} />{t('提示引导')}</button>
-      </div>
-      {account && <button type="button" className="button ghost compact hw-qr-toggle" onClick={() => setShowQr((value) => !value)}><Smartphone size={14} />{showQr ? t('收起二维码') : t('用手机 / 平板交答案')}</button>}
-    </div>
-    {showQr && <QrPanel url={url} />}
-    <InputBox part="answer" account={account} notify={notify} disabled={Boolean(busy)} value={item.draft} onChange={setDraft} label={mode === 'check' ? t('我的答案') : t('你这一步')}
-      placeholder={mode === 'check' ? t('写下你的解答或想法，也可以粘贴截图、拍照上传') : t('写下这一步或你的想法，也可以粘贴截图、拍照上传')} />
-    <div className="hw-actions">
-      {mode === 'check'
-        ? <button className="button primary" disabled={draftEmpty || Boolean(busy)} onClick={() => void submitCheck()}><Check size={16} />{check ? t('再交一次') : t('提交批改')}</button>
-        : <>
-          <button className="button primary" disabled={draftEmpty || Boolean(busy)} onClick={() => void submitAttempt()}><Check size={16} />{t('提交这一步')}</button>
-          <button className="button secondary" disabled={Boolean(busy)} onClick={() => void askHint()}><Sparkles size={16} />{hints ? t('再给一点提示') : t('带我起步')}</button>
-        </>}
-      <button className="button secondary" disabled={draftEmpty || Boolean(busy)} onClick={() => void askQuestion()} title={t('问问这个想法对不对，或者问一个概念')}><MessageCircleQuestion size={16} />{t('问一问')}</button>
-      <span />
-      {canReveal && <button className="button ghost" disabled={Boolean(busy)} onClick={() => void showSolution()}><Eye size={16} />{mode === 'check' ? t('看完整步骤') : t('看完整解答')}</button>}
-      {item.steps.length > 0 && !correctNow && <button className="button ghost" disabled={Boolean(busy)} onClick={() => void finish()}><Flag size={16} />{t('结束这道题')}</button>}
-    </div>
-    {mode === 'check' && lastStep?.kind === 'check' && check?.check?.hint && <div className="hw-fix-hint"><Lightbulb size={13} /><Markdown className="on-dark">{check.check.hint}</Markdown></div>}
-  </section>
-  const doneCard = !finished && correctNow ? <section className="panel hw-card hw-done-card"><CheckCircle2 size={20} /><div><strong>{t('做对了！')}</strong><p>{t('写一张总结卡，把这道题的关键和方法记下来。')}</p></div><button className="button primary" disabled={Boolean(busy)} onClick={() => void finish()}><Flag size={16} />{t('结束这道题 · 写总结')}</button></section> : null
+  const canReveal = !isNew && (mode === 'check' ? Boolean(check?.check?.solution && !check.showSolution) : hasQuestion)
+  const placeholder = !hasQuestion ? t('先放题目（上面），或直接把题目打在这里；也可以写下你的问题或解答')
+    : mode === 'check' ? t('写下你的解答，或问一个问题；可以粘贴截图、拍照')
+    : t('写下这一步或你的想法；可以粘贴截图、拍照')
 
   return <div className="hw-problem">
-    <section className="panel hw-card hw-question">
-      <div className="hw-card-head"><h3>{t('1 · 题目')}</h3><span className={`hw-status ${status}`}>{statusLabel(status)}</span>
+    <section className={`panel hw-card hw-question ${questionOpen ? '' : 'folded'}`}>
+      <div className="hw-card-head">
+        <button type="button" className="hw-fold" aria-expanded={questionOpen} onClick={() => setQuestionOpen((value) => !value)}><ChevronDown size={16} className={questionOpen ? '' : 'turned'} /><h3>{isNew || (questionOpen && item.question.text.trim() && !item.question.images.length) ? t('题目') : itemTitle(item)}</h3></button>
+        {!isNew && <span className={`hw-status ${status}`}>{statusLabel(status)}</span>}
         <div className="hw-card-tools">
-          {!editing && <button type="button" className="icon-button tiny" title={t('修改题目')} aria-label={t('修改题目')} onClick={() => { setQuestionText(item.question.text); setEditing(true) }}><PenLine size={14} /></button>}
-          <button type="button" className="icon-button tiny" title={t('删除这道题')} aria-label={t('删除这道题')} onClick={() => void removeItem()}><Trash2 size={14} /></button>
-        </div></div>
-      <ImageStrip images={item.question.images} />
-      {editing ? <>
-        <InputBox part="question" account={account} notify={notify} label={t('题目')} value={{ text: questionText, images: [] }} onChange={(value) => setQuestionText(value.text)} placeholder={t('题目')} />
-        <div className="hw-actions"><button className="button ghost compact" onClick={() => setEditing(false)}>{t('取消')}</button><button className="button primary compact" disabled={!questionText.trim()} onClick={saveQuestion}>{t('保存')}</button></div>
-      </> : item.question.text.trim() ? <Markdown className="on-dark practice-md">{item.question.text}</Markdown> : <p className="field-hint">{t('题目只有图片。')}</p>}
+          {!isNew && !item.question.images.length && !editing && <button type="button" className="icon-button tiny" title={t('修改题目')} aria-label={t('修改题目')} onClick={() => { setQuestionText(item.question.text); setEditing(true); setQuestionOpen(true) }}><PenLine size={14} /></button>}
+          {onDelete && <button type="button" className="icon-button tiny" title={t('删除这道题')} aria-label={t('删除这道题')} onClick={onDelete}><Trash2 size={14} /></button>}
+        </div>
+      </div>
+      {questionOpen && (isNew
+        ? <QuestionDrop course={course} images={item.question.images} account={account} notify={notify} onChange={(images) => void update((current) => ({ ...current, question: { ...current.question, images } }))} />
+        : editing ? <>
+          <textarea className="hw-question-edit" rows={5} value={questionText} onChange={(event) => setQuestionText(event.target.value)} aria-label={t('题目')} />
+          <div className="hw-actions"><button className="button ghost compact" onClick={() => setEditing(false)}>{t('取消')}</button><button className="button primary compact" disabled={!questionText.trim()} onClick={saveQuestion}>{t('保存')}</button></div>
+        </> : item.question.images.length ? <QuestionPictures images={item.question.images} /> : <Markdown className="on-dark practice-md">{item.question.text}</Markdown>)}
     </section>
-    {item.steps.length > 0 && <div className="hw-steps">{item.steps.map((value, index) => <StepView key={value.id} step={value} index={index} steps={item.steps} />)}</div>}
-    {busy && <div className="hw-thinking"><span className="mini-spinner" />{busy}</div>}
-    {doneCard}
-    {composer}
+
+    {exchanges.length > 0 && <div className="hw-steps">{exchanges.map((exchange, index) => <ExchangeView key={exchange.id} exchange={exchange} steps={item.steps} open={isOpen(exchange, index)} onToggle={() => setOpenState((current) => ({ ...current, [exchange.id]: !isOpen(exchange, index) }))} />)}</div>}
+    {busy && <div className="hw-thinking"><span className="mini-spinner" />{busy}<button type="button" className="button ghost compact" onClick={cancel}><X size={14} />{t('取消')}</button></div>}
+    {!finished && correctNow && <section className="panel hw-card hw-done-card"><CheckCircle2 size={20} /><div><strong>{t('做对了！')}</strong><p>{t('写一张总结卡，把这道题的关键和方法记下来。')}</p></div><button className="button primary" disabled={Boolean(busy)} onClick={() => void finish()}><Flag size={16} />{t('结束这道题 · 写总结')}</button></section>}
+
+    {!finished && <section className="panel hw-card hw-composer">
+      <div className="hw-card-head">
+        <div className="mode-switch hw-mode" role="tablist" aria-label={t('答疑方式')}>
+          <button type="button" role="tab" aria-selected={mode === 'check'} className={mode === 'check' ? 'active' : ''} onClick={() => setMode('check')}><Check size={14} />{t('批改')}</button>
+          <button type="button" role="tab" aria-selected={mode === 'guide'} className={mode === 'guide' ? 'active' : ''} onClick={() => setMode('guide')}><Lightbulb size={14} />{t('提示引导')}</button>
+        </div>
+        {account && !isNew && <button type="button" className="button ghost compact hw-qr-toggle" onClick={() => setShowQr((value) => !value)}><Smartphone size={14} />{showQr ? t('收起二维码') : t('用手机 / 平板交答案')}</button>}
+      </div>
+      {showQr && <QrPanel url={url} />}
+      <MessageBox courseId={course.id} value={draft} onChange={setDraft} placeholder={placeholder} account={account} notify={notify} disabled={Boolean(busy)} />
+      <div className="hw-actions">
+        {mode === 'check'
+          ? <button className="button primary" disabled={draftEmpty || Boolean(busy)} onClick={() => void submitCheck()}><Check size={16} />{check ? t('再交一次') : t('提交批改')}</button>
+          : <>
+            {hints > 0 && <button className="button primary" disabled={draftEmpty || Boolean(busy)} onClick={() => void submitAttempt()}><Check size={16} />{t('提交这一步')}</button>}
+            <button className={`button ${hints > 0 ? 'secondary' : 'primary'}`} disabled={Boolean(busy) || (!hasQuestion && !draft.text.trim())} onClick={() => void askHint()}><Sparkles size={16} />{hints ? t('再给一点提示') : t('带我起步')}</button>
+          </>}
+        <button className="button secondary" disabled={draftEmpty || Boolean(busy)} onClick={() => void askQuestion()}><MessageCircleQuestion size={16} />{t('问一问')}</button>
+        {isNew && onSaveOnly && <button className="button ghost" disabled={Boolean(busy) || (!hasQuestion && !draft.text.trim())} onClick={onSaveOnly}>{t('只保存题目')}</button>}
+        <span />
+        {canReveal && <button className="button ghost" disabled={Boolean(busy)} onClick={() => void showSolution()}><Eye size={16} />{mode === 'check' ? t('看完整步骤') : t('看完整解答')}</button>}
+        {item.steps.length > 0 && !correctNow && <button className="button ghost" disabled={Boolean(busy)} onClick={() => void finish()}><Flag size={16} />{t('结束这道题')}</button>}
+        {(isNew || !draftEmpty) && !busy && <button className="button ghost" onClick={cancel}><X size={16} />{t('取消')}</button>}
+      </div>
+      {mode === 'check' && lastStep?.kind === 'check' && check?.check?.hint && <div className="hw-fix-hint"><Lightbulb size={13} /><Markdown className="on-dark">{check.check.hint}</Markdown></div>}
+    </section>}
     {item.conclusion && <ConclusionCard item={item} course={course} />}
     {item.conclusion && <div className="hw-actions"><Link className="button secondary" to={`/courses/${course.id}/homework/new`}><Plus size={16} />{t('再交一道题')}</Link></div>}
   </div>
 }
 
-// ---------------------------------------------------------------------------
-// New problem: the question only (the answer can come later, from another device)
-// ---------------------------------------------------------------------------
-
-function NewProblem({ course, store, notify, account }: { course: Course; store: Store; notify: Props['notify']; account: boolean }) {
+/** A new problem lives only here until the first message (or 只保存题目); then it's saved and opened. */
+function NewProblem({ course, store, setCourses, notify, account }: { course: Course; store: Store } & Omit<Props, 'courses'>) {
   const navigate = useNavigate()
-  const [draft, setDraft] = useState<Draft>({ text: '', images: [] })
-  const { text, images } = draft
-  const [saving, setSaving] = useState(false)
-  const save = async () => {
-    if (!text.trim() && !images.length) return
-    setSaving(true)
-    const item = createItem(course.id, { text: text.trim(), images })
-    try {
-      await store.add(item)
-      navigate(`/courses/${course.id}/homework/${item.id}`)
-    } catch (error) {
-      notify(error instanceof Error ? error.message : t('保存失败'))
-    } finally {
-      setSaving(false)
-    }
+  const [item, setItem] = useState(() => createItem(course.id, { text: '', images: [] }))
+  const latest = useRef(item)
+  latest.current = item
+  const save = async (next: HwItem) => {
+    await store.add({ ...next, updatedAt: Date.now() })
+    navigate(`/courses/${course.id}/homework/${next.id}`)
   }
-  return <section className="panel hw-card hw-new">
-    <h3>{t('1 · 题目')}</h3>
-    <InputBox part="question" account={account} notify={notify} label={t('题目')} rows={8} value={draft} onChange={setDraft} placeholder={t('输入题目，也可以粘贴截图、拍照或上传图片 / PDF')} />
-    <div className="hw-actions"><button className="button primary" disabled={(!text.trim() && !images.length) || saving} onClick={() => void save()}>{saving ? <RefreshCw className="spin-icon" size={16} /> : <Check size={16} />}{t('保存题目')}</button></div>
-  </section>
+  const update: Update = async (change) => {
+    const next = change(latest.current)
+    latest.current = next
+    if (next.steps.length) await save(next)
+    else setItem(next)
+  }
+  const saveOnly = () => {
+    const current = latest.current
+    const typed = current.draft.text.trim()
+    const next = current.question.images.length || !typed ? current : { ...current, question: { ...current.question, text: typed }, draft: EMPTY }
+    void save({ ...next, title: titleFor(next, typed) })
+  }
+  const discard = () => {
+    setItem(createItem(course.id, { text: '', images: [] }))
+    navigate(`/courses/${course.id}/homework`)
+  }
+  return <ProblemView course={course} item={item} update={update} isNew onSaveOnly={saveOnly} onDiscard={discard} setCourses={setCourses} notify={notify} account={account} />
 }
 
 // ---------------------------------------------------------------------------
@@ -429,6 +620,11 @@ export function HomeworkPage({ courses, setCourses, notify, account }: Props) {
   if (!course) return <NotFound />
   const item = itemId && itemId !== 'new' ? store.items.find((value) => value.id === itemId) : undefined
   const atList = !itemId
+  const removeItem = async (id: string) => {
+    if (!window.confirm(t('删除这道题？'))) return
+    await store.remove(id).catch((error) => notify(error instanceof Error ? error.message : t('删除失败')))
+    navigate(`/courses/${course.id}/homework`)
+  }
 
   return <div className="page homework-page">
     <div className="back-row"><Link to={`/courses/${course.id}`}><ArrowLeft size={16} />{course.title}</Link><span>/</span><span>{t('题目答疑')}</span></div>
@@ -445,7 +641,7 @@ export function HomeworkPage({ courses, setCourses, notify, account }: Props) {
           const status = itemStatus(value)
           const verdict = lastCheck(value)?.check?.verdict
           return <Link key={value.id} to={`/courses/${course.id}/homework/${value.id}`} className={`homework-item ${value.id === itemId ? 'active' : ''}`}>
-            <strong>{value.title}</strong>
+            <strong>{itemTitle(value)}</strong>
             <small><span className={`hw-status ${status}`}>{statusLabel(status)}</span>{status === 'done' ? (value.conclusion?.solved ? ` · ${t('自己做出来了')}` : ` · ${t('记入薄弱点')}`) : verdict ? ` · ${verdictText(verdict)}` : ''}</small>
           </Link>
         })}
@@ -453,8 +649,8 @@ export function HomeworkPage({ courses, setCourses, notify, account }: Props) {
       <main className="homework-main">
         {itemId && itemId !== 'new' && !item && store.loaded && <div className="empty-hint">{t('找不到这道题，可能已经被删除了。')}</div>}
         {itemId && itemId !== 'new' && !item && !store.loaded && <div className="empty-hint"><span className="mini-spinner" /></div>}
-        {item ? <ProblemView key={item.id} course={course} item={item} store={store} setCourses={setCourses} notify={notify} account={account} />
-          : (!itemId || itemId === 'new') && <NewProblem course={course} store={store} notify={notify} account={account} />}
+        {item ? <ProblemView key={item.id} course={course} item={item} update={(change, debounce) => store.update(item.id, change, debounce)} onDelete={() => void removeItem(item.id)} setCourses={setCourses} notify={notify} account={account} />
+          : (!itemId || itemId === 'new') && <NewProblem key={course.id} course={course} store={store} setCourses={setCourses} notify={notify} account={account} />}
         {itemId && <Link className="text-button homework-back" to={`/courses/${course.id}/homework`}><ArrowLeft size={14} />{t('全部题目')}</Link>}
       </main>
     </div>

@@ -19,11 +19,22 @@ export function updateSection(setCourses: Dispatch<SetStateAction<Course[]>>, co
 
 const MARKDOWN_PLUGINS = { remarkPlugins: [remarkGfm, remarkMath], rehypePlugins: [rehypeKatex] }
 
+/**
+ * Models often write \( … \) and \[ … \]; Markdown would eat the backslashes and show "(E_{12})".
+ * Turn them into $ … $ / $$ … $$, which the math renderer understands (code blocks are left alone).
+ */
+export function mathDelimiters(text: string) {
+  if (!text || !text.includes('\\')) return text
+  return text.split(/(```[\s\S]*?```|`[^`\n]*`)/).map((part, index) => index % 2 ? part : part
+    .replace(/(?<!\\)\\\[([\s\S]+?)(?<!\\)\\\]/g, (_, body: string) => `\n$$\n${body.trim()}\n$$\n`)
+    .replace(/(?<!\\)\\\(([\s\S]+?)(?<!\\)\\\)/g, (_, body: string) => `$${body.trim()}$`)).join('')
+}
+
 export function Markdown({ children, className }: { children: string; className?: string }) {
   return (
     <div className={className ? `markdown-body ${className}` : 'markdown-body'}>
       <ReactMarkdown remarkPlugins={MARKDOWN_PLUGINS.remarkPlugins} rehypePlugins={MARKDOWN_PLUGINS.rehypePlugins}>
-        {children}
+        {mathDelimiters(children)}
       </ReactMarkdown>
     </div>
   )

@@ -27,6 +27,8 @@ export interface HwStep {
   showSolution?: boolean
   /** On a reply: whether the student's idea was right (null = it was a question). */
   verdict?: 'correct' | 'partial' | 'wrong' | null
+  /** What the server read from this message's pictures (not shown; sent back as context later). */
+  read?: string
 }
 
 export interface HwItem {
@@ -73,7 +75,18 @@ export function titleFrom(text: string) {
     .replace(/\\(frac|dfrac)\{([^}]*)\}\{([^}]*)\}/g, '($2)/($3)').replace(/\\[a-zA-Z]+/g, ' ')
     .replace(/[#>*_`${}\\]/g, '').replace(/\s+/g, ' ').trim()
   const line = text.split('\n').map(plain).find(Boolean) || ''
-  return line.length > 40 ? `${line.slice(0, 40)}…` : line || t('未命名题目')
+  return line.length > 40 ? `${line.slice(0, 40)}…` : line
+}
+
+/** What the list shows; a question that's only a picture gets its name after the first reply. */
+export const itemTitle = (item: HwItem) => item.title || t('未命名题目')
+
+/** A name for the list: the question's first line, else the first message, else the file name. */
+export function titleFor(item: HwItem, message = '') {
+  if (item.question.text.trim()) return titleFrom(item.question.text)
+  if (message.trim()) return titleFrom(message)
+  const named = item.question.images.find((image) => !/^(image|img|photo|screenshot|截图|屏幕截图)[\s_\-\d.]*\.(png|jpe?g|webp|heic)$/i.test(image.name))
+  return named ? named.name.replace(/\.[^.]+$/, '') : ''
 }
 
 export function createItem(courseId: string, question: { text: string; images: HwImage[] }): HwItem {
@@ -89,10 +102,16 @@ export function homeworkTopics(course: Course): HomeworkTopic[] {
   return course.sections.flatMap((section) => sectionNodes(section).map((node) => ({ key: `${section.id}:${node.id}`, title: `${section.title} · ${node.title}` }))).slice(0, 150)
 }
 
-export function homeworkContext(course: Course, item: HwItem): HomeworkContext {
-  const matched = rankNodes(course, item.question.text, 2)
+/**
+ * The question as the AI gets it: typed text, or the question's pictures (read on the server, never shown).
+ * `hint` (the student's message) helps find the matching notes when the question is only a picture.
+ */
+export function homeworkContext(course: Course, item: HwItem, hint = ''): HomeworkContext {
+  const pictures = item.question.text.trim() ? [] : item.question.images.map((image) => image.id)
+  const words = [item.question.text, item.title, hint, ...item.steps.map((step) => step.read || '').slice(-3)].join('\n')
+  const matched = rankNodes(course, words, 2)
   const reference = matched.map((node) => node.content.slice(0, 3500)).join('\n\n').slice(0, 7500)
-  return { course_title: course.title, question: item.question.text, reference, topics: homeworkTopics(course), learner_memory: learnerMemory(course.id, item.question.text) }
+  return { course_title: course.title, question: item.question.text, question_uploads: pictures, reference, topics: homeworkTopics(course), learner_memory: learnerMemory(course.id, words) }
 }
 
 /** The conversation so far, for the AI. The correct answer from marking is left out so hints can't leak it. */
@@ -103,7 +122,8 @@ export function historyOf(item: HwItem): HomeworkTurn[] {
       return { role: 'check', text: `${verdict}${where ? `；第一处错误：${where}` : ''}${why ? `；${why}` : ''}` } // i18n-ok: AI prompt text
     }
     if (step.kind === 'reply' && step.verdict) return { role: 'reply', text: `（${step.verdict}）${step.text}` } // i18n-ok: AI prompt text
-    return { role: step.kind as HomeworkTurn['role'], text: step.text }
+    const text = step.read ? `${step.text}\n（附图内容）\n${step.read}`.trim() : step.text // i18n-ok: AI prompt text
+    return { role: step.kind as HomeworkTurn['role'], text }
   }).slice(-30)
 }
 

@@ -174,9 +174,13 @@ All AI output uses the `@@TAG` text format rather than JSON, so LaTeX can't brea
   - the PC re-reads the list every few seconds while the page is open, so an answer photographed on a phone shows up by itself;
   - "用手机 / 平板交答案" shows a QR code for the problem's URL. The phone needs to be signed in to the same account.
 - **Input:**
-  - you can type (LaTeX works, with a 预览公式 tab) or use 拍照 / 上传图片、PDF;
+  - you can type (LaTeX works, with a 预览公式 tab) or use 拍照 / 上传图片、PDF / 从网盘选择;
   - photos are shrunk on the device first, which also turns iPhone HEIC into JPEG;
-  - `/api/homework/read` copies the question, or the student's working line by line, into text once. The copy keeps the student's mistakes, and every later turn is text only.
+  - pictures stay pictures on screen. The server reads them when a message is sent (`question_uploads`, `answer_uploads` / `attempt_uploads` / `message_uploads` on `/check`, `/guide`, `/ask`), once per upload: the copy is cached, encrypted, next to the file (`read-question.txt` / `read-answer.txt`). The answer copy keeps the student's mistakes; what was read from the student's pictures comes back as `read` and goes into later turns' history;
+  - a picture-only question gets a short name for the list (`@@TITLE` from the reading, else its first sentence) after the first reply;
+  - no question first is fine: with no question picture, the first message typed is the question. 只保存题目 saves a problem without asking anything (to send the answer from a phone).
+- **Cloud drive (`/api/cloud/list`, `/api/cloud/import`):** paste a Seafile share link (`/d/<token>/` folder or `/f/<token>/` file), browse folders and add files; the server downloads them as uploads. Only hosts in `CLOUD_DRIVE_HOSTS` (default `cloud.tsinghua.edu.cn`), https only, redirects checked against the same list; password-protected or expired links show an error. The last link is remembered per course in the browser.
+- **Layout:** the question card and each exchange (my message + the AI's reply) fold with an arrow; the last two exchanges are open. A running request has 取消, and 取消 next to the input clears it (or discards a new, unsaved problem).
 - **批改** (`/check`): 正确 / 部分正确 / 错误, the mistake type, the **first** wrong step, why it's wrong, and the correct final answer. Full steps are worked out but only shown on 看完整步骤. After that come 给我提示, 再交一次 and 结束这道题.
 - **带我起步** (`/guide`):
   - one hint at a time: first which concept, then how to write the first step, then the next step based on the student's latest attempt;
@@ -186,7 +190,7 @@ All AI output uses the `@@TAG` text format rather than JSON, so LaTeX can't brea
   - the summary card has the key idea, the method to reuse, and where the student got stuck;
   - 自己做出来了 only counts if the solution wasn't viewed;
   - the result goes through the same `recordAnswer` as everything else (source 作业), so it shows in 薄弱点, 知识档案 and the exam plan, linked to the knowledge point the AI picked from the course's list.
-- **One input box:** type, take a photo, upload a file, paste a screenshot (Ctrl/⌘+V) or drag a file in. Pictures are copied into the text so the student can check them.
+- **One input box:** type, take a photo, upload a file, pick from the cloud drive, paste a screenshot (Ctrl/⌘+V) or drag a file in.
 - **Switching modes:** a 批改 / 提示引导 switch above the input, available at any point in a problem.
 - **问一问** (`/ask`): the student sends an idea or a question. The AI judges the idea (想法对 / 部分对 / 想法有问题) or answers the question, without giving the full solution unless that message asks for it.
 - **Context for the AI:** the two best-matching notes from the course, the course's knowledge-point list, and the 知识档案. The correct answer from marking is kept out of the hint history so hints can't give it away.

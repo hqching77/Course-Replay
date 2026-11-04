@@ -936,7 +936,6 @@ button.semester-row svg { color: #68717f; transition: transform .2s ease; }
 .hw-qr strong { color: #e3eef5; font-size: 13px; }
 .hw-qr p { margin: 0; color: #9fb4c2; font-size: 12px; line-height: 1.6; }
 .hw-qr code { color: #7f97a6; font-size: 11px; word-break: break-all; }
-.hw-qr .hw-qr-warning { color: #f0b86a; }
 .hw-steps { display: flex; flex-direction: column; gap: 10px; }
 .hw-step { padding: 13px 16px; border-radius: 10px; border: 1px solid #262e37; background: #11161c; display: flex; flex-direction: column; gap: 8px; }
 .hw-step-label { display: inline-flex; align-items: center; gap: 6px; color: #8a95a2; font-size: 11px; font-weight: 600; letter-spacing: .03em; }
@@ -996,3 +995,63 @@ button.semester-row svg { color: #68717f; transition: transform .2s ease; }
 .hw-reply.correct .hw-step-label em { background: #1d2a17; color: var(--lime); }
 .hw-reply.partial .hw-step-label em { background: #352c1c; color: #eebc66; }
 .hw-reply.wrong .hw-step-label em { background: #38201b; color: #ff9573; }
+
+/* 题目答疑: question pictures, cloud drive, folding exchanges */
+.hw-fold { display: inline-flex; align-items: center; gap: 8px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; text-align: left; }
+.hw-fold h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turned { transform: rotate(-90deg); }
+.hw-question.folded { padding-bottom: 14px; }
+.hw-question-pictures { display: flex; flex-direction: column; gap: 12px; }
+.hw-question-pictures figure { position: relative; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.hw-question-pictures figcaption { color: #7a8491; font-size: 11px; }
+.hw-question-picture { display: block; padding: 0; border: 1px solid #2c343e; border-radius: 9px; overflow: hidden; background: #fff; cursor: zoom-in; max-width: 100%; align-self: flex-start; }
+.hw-question-picture img { display: block; max-width: 100%; max-height: 62vh; width: auto; height: auto; }
+.hw-question-picture .hw-image-loading, .hw-question-picture .hw-image-missing { display: grid; place-items: center; width: 320px; height: 180px; background: #10151b; color: #7a8491; }
+.hw-question-edit { width: 100%; border: 1px solid #2c343e; border-radius: 9px; background: #0f1318; color: #e3e8ee; padding: 12px; font: inherit; font-size: 13px; resize: vertical; }
+.hw-file-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 260px; padding: 8px 10px; border: 1px solid #2c343e; border-radius: 8px; background: #10151b; color: #c8d0d9; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hw-drop { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px dashed #38424e; border-radius: 10px; background: #0f1318; outline: none; }
+.hw-drop:focus { border-color: #67764f; }
+.hw-drop.dragging { border-color: var(--lime); background: #121810; }
+.hw-drop.filled { border-style: solid; }
+.hw-drop-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; justify-content: space-between; }
+.hw-drop-hint { color: #8a95a2; font-size: 12px; }
+.hw-cloud { width: min(620px, 100%); max-height: calc(100dvh - 40px); display: flex; flex-direction: column; }
+.hw-cloud .modal-head { margin-bottom: 14px; }
+.hw-cloud-link { display: flex; gap: 8px; }
+.hw-cloud-link input { flex: 1; min-width: 0; height: 36px; border: 1px solid #2c343e; border-radius: 8px; background: #0f1318; color: #e8edf3; padding: 0 10px; font-size: 12.5px; outline: none; }
+.hw-cloud-error { margin: 10px 0 0; padding: 9px 11px; border-radius: 8px; background: #2a1915; color: #ffad94; font-size: 12px; }
+.hw-cloud-crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin: 12px 0 6px; color: #7a8491; font-size: 12px; }
+.hw-cloud-crumbs span { display: inline-flex; align-items: center; gap: 2px; }
+.hw-cloud-crumbs button { border: 0; background: none; color: #aeb7c2; padding: 3px 4px; border-radius: 5px; font-size: 12px; }
+.hw-cloud-crumbs button:hover { background: #1b2128; color: #eef2f6; }
+.hw-cloud-list { flex: 1; min-height: 120px; overflow-y: auto; border: 1px solid #222a33; border-radius: 9px; }
+.hw-cloud-list .field-hint { padding: 14px; margin: 0; }
+.hw-cloud-row { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 0; border-top: 1px solid #20272f; background: none; color: #dfe4ea; font-size: 12.5px; text-align: left; }
+.hw-cloud-row:first-child { border-top: 0; }
+.hw-cloud-row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hw-cloud-row small { color: #727c88; font-size: 11px; flex: none; }
+.hw-cloud-row.folder:hover { background: #161c23; }
+.hw-cloud-row.folder svg:first-child { color: #e4c56a; }
+.hw-cloud-row.unsupported { color: #6f7884; }
+.hw-exchange { border: 1px solid #262e37; border-radius: 11px; background: #0f1419; }
+.hw-exchange.open { background: transparent; border-color: #222a33; }
+.hw-exchange-head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 0; background: none; color: #c8d0d9; text-align: left; font-size: 12.5px; }
+.hw-exchange-head strong { flex: none; color: #eef2f6; font-weight: 600; }
+.hw-exchange-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8a95a2; }
+.hw-exchange-head svg { flex: none; color: #8a95a2; transition: transform .15s ease; }
+.hw-chip { margin-left: auto; flex: none; font-style: normal; padding: 1px 8px; border-radius: 99px; font-size: 10.5px; background: #20262e; color: #aab3bf; }
+.hw-chip.correct { background: #1d2a17; color: var(--lime); }
+.hw-chip.partial { background: #352c1c; color: #eebc66; }
+.hw-chip.wrong { background: #38201b; color: #ff9573; }
+.hw-exchange-body { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px; }
+.hw-exchange-body .hw-mine { margin-left: 0; }
+.hw-thinking .button { margin-left: 6px; }
+@media (max-width: 680px) {
+  .hw-question-picture img { max-height: 50vh; }
+  .hw-cloud-link { flex-direction: column; }
+}
+.hw-exchange-body.solo > .hw-step > .hw-step-label { display: none; }
+.hw-question .hw-card-head .hw-fold { flex: 0 1 auto; }
+.hw-question .hw-card-head h3 { flex: 0 1 auto; min-width: 0; }
+.hw-question .hw-card-head .hw-status { flex: none; white-space: nowrap; }
+.hw-question .hw-card-tools { flex: none; }

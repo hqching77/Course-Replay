@@ -29,7 +29,7 @@ def ai(monkeypatch):
 
     async def fake_vision(self, content, *, system_prompt, max_tokens=8000):
         calls.append([{"role": "system", "content": system_prompt}, {"role": "user", "content": content}])
-        return ("求 $A$ 的逆矩阵" if "【抄题】" in system_prompt else "$\\det A = 4-6 = -2$\n$A^{-1} = ...$"), None
+        return ("@@TITLE 求 A 的逆矩阵\n求 $A$ 的逆矩阵" if "【抄题】" in system_prompt else "$\\det A = 4-6 = -2$\n$A^{-1} = ...$"), None
 
     monkeypatch.setattr(AIProvider, "chat", fake_chat)
     monkeypatch.setattr(AIProvider, "analyze_visual_materials", fake_vision)
@@ -124,7 +124,7 @@ def test_guide_gives_one_hint_and_never_the_answer(client, ai):
     hq = auth_header(register(client, "hw-guide").json()["token"])
     replies["【引导】"] = "@@FEEDBACK\n这一步对\n@@ONTRACK yes\n@@HINT\n先想想 $\\det A$ 怎么算\n@@DONE no\n@@TOPIC s1:n2\n@@END"
     first = client.post("/api/homework/guide", json=BASE, headers=hq).json()
-    assert first == {"feedback": "", "on_track": True, "hint": "先想想 $\\det A$ 怎么算", "done": False, "topic_key": "s1:n2"}
+    assert first == {"feedback": "", "on_track": True, "hint": "先想想 $\\det A$ 怎么算", "done": False, "topic_key": "s1:n2", "read": "", "title": ""}
     assert "绝对不要给出完整解答" in calls[-1][0]["content"] and "学生没有新的尝试" in calls[-1][1]["content"]
 
     replies["【引导】"] = "@@FEEDBACK\n对了，答案正确\n@@ONTRACK yes\n@@HINT\n不该出现\n@@DONE yes\n@@TOPIC none\n@@END"
@@ -154,7 +154,7 @@ def test_student_can_ask_whether_their_idea_is_right(client, ai):
     replies["【答疑】"] = "@@VERDICT partial\n@@REPLY\n方向对：先求 $\\det A$。但不需要特征值。\n@@TOPIC s1:n2\n@@END"
     history = [{"role": "hint", "text": "先求行列式"}, {"role": "ask", "text": "要用伴随矩阵吗"}, {"role": "reply", "text": "要"}]
     result = client.post("/api/homework/ask", json={**BASE, "history": history, "message": "我打算先求特征值，再求逆，对吗？"}, headers=hq).json()
-    assert result == {"verdict": "partial", "reply": "方向对：先求 $\\det A$。但不需要特征值。", "topic_key": "s1:n2"}
+    assert result == {"verdict": "partial", "reply": "方向对：先求 $\\det A$。但不需要特征值。", "topic_key": "s1:n2", "read": "", "title": ""}
     system, user = calls[-1][0]["content"], calls[-1][1]["content"]
     assert "除非他在这条消息里明确要求" in system
     assert "【学生的问题 / 想法】\n要用伴随矩阵吗" in user and "【学生这条消息】\n我打算先求特征值" in user
@@ -162,4 +162,44 @@ def test_student_can_ask_whether_their_idea_is_right(client, ai):
     replies["【答疑】"] = "@@VERDICT none\n@@REPLY\n伴随矩阵是代数余子式矩阵的转置。\n@@TOPIC none\n@@END"
     result = client.post("/api/homework/ask", json={**BASE, "message": "什么是伴随矩阵？"}, headers=hq).json()
     assert result["verdict"] is None and result["topic_key"] is None
-    assert client.post("/api/homework/ask", json={**BASE, "message": ""}, headers=hq).status_code == 422
+    assert client.post("/api/homework/ask", json={**BASE, "message": ""}, headers=hq).status_code == 400
+
+
+def test_question_and_working_can_be_pictures_only_read_once_on_the_server(client, ai):
+    calls, replies = ai
+    hq = auth_header(register(client, "hw-pictures").json()["token"])
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 90), "18. Suppose A is invertible", fontsize=12)
+    question = client.post("/api/uploads", files={"file": ("hw3.pdf", doc.tobytes(), "application/pdf")}, headers=hq).json()
+    photo = fitz.open()
+    photo.new_page(width=300, height=200).insert_text((20, 100), "det A = 2", fontsize=14)
+    working = client.post("/api/uploads", files={"file": ("IMG_1.png", photo[0].get_pixmap().tobytes("png"), "image/png")}, headers=hq).json()
+    replies["【答疑】"] = "@@VERDICT none\n@@REPLY\n先看行列式。\n@@TOPIC none\n@@END"
+    replies["【作业批改】"] = "@@VERDICT wrong\n@@KIND calc\n@@WHERE\n$\\det A = 2$\n@@WHY\n符号\n@@ANSWER\n-2\n@@SOLUTION\n...\n@@HINT\n再算\n@@TOPIC none\n@@END"
+    context = {k: v for k, v in BASE.items() if k != "question"} | {"question_uploads": [question["id"]]}
+
+    first = client.post("/api/homework/ask", json={**context, "message": "不要告诉我答案，怎么证明？"}, headers=hq).json()
+    assert first["reply"] == "先看行列式。" and first["read"] == "" and first["title"] == "求 A 的逆矩阵"
+    vision = [call for call in calls if "【抄" in call[0]["content"]]
+    assert len(vision) == 1 and "【抄题】" in vision[0][0]["content"]
+    assert "题目：\n求 $A$ 的逆矩阵" in calls[-1][1]["content"] and "@@TITLE" not in calls[-1][1]["content"]  # the question as read from the PDF
+
+    checked = client.post("/api/homework/check", json={**context, "answer": "", "answer_uploads": [working["id"]]}, headers=hq).json()
+    assert checked["verdict"] == "wrong" and checked["read"].startswith("$\\det A") and checked["title"] == "求 A 的逆矩阵"
+    vision = [call for call in calls if "【抄" in call[0]["content"]]
+    assert len(vision) == 2 and "【抄答案】" in vision[1][0]["content"]  # the question wasn't read again
+    assert "【学生这次交的解答】\n（附图内容）\n$\\det A" in calls[-1][1]["content"]
+    assert "不要用 \\(...\\)" in calls[-1][0]["content"]
+
+    assert client.post("/api/homework/ask", json={**{k: v for k, v in BASE.items() if k != "question"}, "message": "hi"}, headers=hq).json()["detail"] == "先上传题目，或写下题目"
+    assert client.post("/api/homework/check", json={**context, "answer": ""}, headers=hq).json()["detail"] == "先写下或上传你的解答"
+
+
+def test_short_titles_for_picture_questions():
+    from app.api.homework import _title_and_body
+
+    assert _title_and_body("@@TITLE 二阶矩阵求逆\n求 $A$ 的逆矩阵") == ("二阶矩阵求逆", "求 $A$ 的逆矩阵")
+    # No title line from the model: first sentence, formulas dropped.
+    assert _title_and_body("18. 设 $A=\\begin{pmatrix}1&2\\\\3&4\\end{pmatrix}$，求 $A$ 的逆矩阵。再验证 $AA^{-1}=I$。")[0] == "设 A= 1 2; 3 4 ，求 A 的逆矩阵"
+    assert _title_and_body("(b) Find the inverse of $A$. Then check it.")[0] == "Find the inverse of A"
+    assert _title_and_body("$x$")[0] == ""

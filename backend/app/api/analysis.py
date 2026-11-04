@@ -41,6 +41,7 @@ from app.crypto import decrypt_text, encrypt_text
 from app.providers import effective_settings, language_rule, reply_language, stt_config, transcribe_audio
 from app.services.learner import MAX_MEMORY_CHARS, learner_note
 from app.security import get_optional_user, require_ai_access, require_stt_access
+from app.services.book_structure import page_count
 
 
 router = APIRouter(tags=["visual-analysis"])
@@ -399,7 +400,7 @@ async def upload_course_file(
         id=upload_id, user_id=user.id if user else None, filename=safe_name, stored_path=str(destination), size=size
     ))
     db.commit()
-    return FileUploadRead(id=upload_id, filename=safe_name, size=size)
+    return FileUploadRead(id=upload_id, filename=safe_name, size=size, pages=page_count(destination))
 
 
 def _owner_matches(job: VisualJob, user: User | None) -> bool:

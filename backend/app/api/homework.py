@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from app.api.practice import _ask, _ensure_ai, parse_blocks
 from app.config import get_settings
+from app.crypto import decrypt_text, encrypt_text
 from app.database import get_db
 from app.models import HomeworkItem, UploadedFile, User
 from app.providers import language_rule, reply_language
@@ -138,7 +139,8 @@ def upload_page(
 # Copy the question / the student's working from photos or PDFs into text
 # ---------------------------------------------------------------------------
 
-READ_QUESTION_PROMPT = """【抄题】把图片 / 文档里的题目一字不差地抄成 Markdown：
+READ_QUESTION_PROMPT = """【抄题】把图片 / 文档里的题目一字不差地抄成 Markdown。
+第一行写 `@@TITLE 题目的简短名称`（不超过 15 个字，说清楚求什么，不要公式），从第二行开始抄题：
 - 公式用 LaTeX（行内 $...$，独立公式 $$...$$），矩阵用 \\begin{pmatrix}...\\end{pmatrix}；
 - 保留题号、小题 (a)(b)…、已知条件；图只用一句话描述，写成「［图：…］」；
 - 只抄题目，不要解题，不要加评论；看不清的地方写「［看不清］」。
@@ -161,28 +163,82 @@ class ReadResponse(BaseModel):
     pages: dict[str, int]
 
 
+async def _read_upload(request: Request, row: UploadedFile, part: str) -> tuple[str, int]:
+    """What's written in one uploaded photo / PDF, as text. Cached next to the file, so each picture is read once."""
+    settings = _ensure_ai(request)
+    source = Path(row.stored_path)
+    cache = source.parent / f"read-{part}.txt"
+    try:
+        document = await asyncio.to_thread(prepare_visual_document, source, row.filename, source.parent, get_settings())
+    except VisualProcessingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if cache.exists():
+        try:
+            return decrypt_text(cache.read_text(encoding="utf-8")), document.pages
+        except Exception:
+            cache.unlink(missing_ok=True)
+    prompt = (READ_QUESTION_PROMPT if part == "question" else READ_ANSWER_PROMPT) + MATH_RULE + language_rule(reply_language(request))
+    parts = list(document.content_parts)
+    texts: list[str] = []
+    for start in range(0, max(len(parts), 1), 40):
+        try:
+            raw, _ = await AIProvider(settings).analyze_visual_materials(parts[start:start + 40], system_prompt=prompt, max_tokens=4000)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"AI 读图失败：{exc}") from exc
+        texts.append(raw.strip())
+    text = "\n\n".join(item for item in texts if item)[:12000]
+    if text:
+        cache.write_text(encrypt_text(text), encoding="utf-8")
+    return text, document.pages
+
+
+def _plain_title(text: str) -> str:
+    """A short list title from a question's text when the model didn't give one: its first sentence, LaTeX flattened."""
+    line = next((value for value in text.splitlines() if value.strip()), "")
+    line = re.sub(r"\\(begin|end)\{[^}]*\}", " ", line).replace("\\\\", "; ").replace("&", " ")
+    line = re.sub(r"\\d?frac\{([^}]*)\}\{([^}]*)\}", r"(\1)/(\2)", line)
+    line = re.sub(r"\\[a-zA-Z]+", " ", line)
+    line = re.sub(r"[#>*_`${}\\]", "", line)
+    line = re.sub(r"^\s*(\d+[.、)]|[(（][0-9a-z]+[)）])\s*", "", line)
+    line = re.split(r"[。？！?!；]|\.(?:\s|$)", re.sub(r"\s+", " ", line).strip())[0].strip(" ，,:：")
+    return (line[:24] + "…" if len(line) > 24 else line) if len(line) >= 2 else ""
+
+
+def _title_and_body(text: str) -> tuple[str, str]:
+    first, _, rest = text.partition("\n")
+    if first.strip().startswith("@@TITLE"):
+        title = first.strip()[len("@@TITLE"):].strip(" ：:`").strip()
+        body = rest.strip()
+        return (title[:30] or _plain_title(body)), body
+    return _plain_title(text), text
+
+
+async def _read_uploads(request: Request, db: Session, user: User | None, upload_ids: list[str], part: str) -> tuple[str, str]:
+    """Everything read from these uploads → (text, a short title from the first one; questions only)."""
+    texts: list[str] = []
+    title = ""
+    for upload_id in upload_ids:
+        text, _ = await _read_upload(request, _owned_upload(db, upload_id, user), part)
+        if part == "question":
+            found, text = _title_and_body(text)
+            title = title or found
+        if text:
+            texts.append(text)
+    return "\n\n".join(texts)[:12000], title
+
+
 @router.post("/homework/read", response_model=ReadResponse)
 async def read_homework(payload: ReadRequest, request: Request, user: User | None = Depends(require_ai_access), db: Session = Depends(get_db)) -> ReadResponse:
-    settings = _ensure_ai(request)
-    rows = [_owned_upload(db, upload_id, user) for upload_id in payload.upload_ids]
-    prompt = (READ_QUESTION_PROMPT if payload.part == "question" else READ_ANSWER_PROMPT) + language_rule(reply_language(request))
     texts: list[str] = []
     pages: dict[str, int] = {}
-    for row in rows:
-        source = Path(row.stored_path)
-        try:
-            document = await asyncio.to_thread(prepare_visual_document, source, row.filename, source.parent, get_settings())
-        except VisualProcessingError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        pages[row.id] = document.pages
-        parts = list(document.content_parts)
-        for start in range(0, max(len(parts), 1), 40):
-            try:
-                raw, _ = await AIProvider(settings).analyze_visual_materials(parts[start:start + 40], system_prompt=prompt, max_tokens=4000)
-            except Exception as exc:
-                raise HTTPException(status_code=502, detail=f"AI 读图失败：{exc}") from exc
-            texts.append(raw.strip())
-    text = "\n\n".join(item for item in texts if item)
+    for upload_id in payload.upload_ids:
+        text, count = await _read_upload(request, _owned_upload(db, upload_id, user), payload.part)
+        if payload.part == "question":
+            text = _title_and_body(text)[1]
+        pages[upload_id] = count
+        if text:
+            texts.append(text)
+    text = "\n\n".join(texts)
     if not text:
         raise HTTPException(status_code=502, detail="没有从图片里读到内容，请换一张更清楚的照片")
     return ReadResponse(text=text[:12000], pages=pages)
@@ -199,7 +255,9 @@ class TopicRef(BaseModel):
 
 class HomeworkContext(BaseModel):
     course_title: str = Field(default="", max_length=300)
-    question: str = Field(min_length=1, max_length=12000)
+    # Typed question text; and/or the question's photos / PDFs, which are read here.
+    question: str = Field(default="", max_length=12000)
+    question_uploads: list[str] = Field(default_factory=list, max_length=8)
     reference: str = Field(default="", max_length=8000)  # the matching notes from the course
     topics: list[TopicRef] = Field(default_factory=list, max_length=150)
     learner_memory: str = Field(default="", max_length=4000)
@@ -236,8 +294,29 @@ def _context(payload: HomeworkContext, history: list[Turn] | None = None) -> str
     return "\n\n".join(parts)
 
 
+MATH_RULE = "\n公式一律用 $...$（行内）或 $$...$$（独立一行），不要用 \\(...\\) 或 \\[...\\]。"
+
+
 def _system(prompt: str, payload: HomeworkContext) -> str:
-    return prompt + learner_note(payload.learner_memory, "tutor")
+    return prompt + MATH_RULE + learner_note(payload.learner_memory, "tutor")
+
+
+async def _prepare(payload: HomeworkContext, request: Request, db: Session, user: User | None) -> str:
+    """Fill in the question from its pictures (read once and cached). Returns a short title when it came from pictures."""
+    title = ""
+    if payload.question_uploads:
+        read, title = await _read_uploads(request, db, user, payload.question_uploads, "question")
+        payload.question = "\n\n".join(part for part in (read, payload.question.strip()) if part)
+    if not payload.question.strip():
+        raise HTTPException(status_code=400, detail="先上传题目，或写下题目")
+    return title
+
+
+async def _message(text: str, uploads: list[str], request: Request, db: Session, user: User | None) -> tuple[str, str]:
+    """The student's message plus what's in the photos they attached → (full text, what was read from the photos)."""
+    read = (await _read_uploads(request, db, user, uploads, "answer"))[0] if uploads else ""
+    full = "\n\n".join(part for part in (text.strip(), f"（附图内容）\n{read}" if read else "") if part)
+    return full, read
 
 
 def _fields(raw: str) -> dict[str, tuple[dict[str, str], str]]:
@@ -273,7 +352,7 @@ CHECK_PROMPT = """【作业批改】你在批改学生的作业。先自己完�
 - 完整解题步骤写在 SOLUTION 里，只有学生要求时才会显示；
 - HINT 写一句提示，帮他自己改正那一步，不要直接写出改正后的结果；
 - 从知识点列表里选这道题主要考的 key，都不合适写 none；
-- 公式用 LaTeX（行内 $...$）。
+- 公式用 LaTeX。
 严格按下面格式输出：
 @@VERDICT <correct/partial/wrong>
 @@KIND <concept/start/calc/careless/none>
@@ -292,7 +371,8 @@ CHECK_PROMPT = """【作业批改】你在批改学生的作业。先自己完�
 
 
 class CheckRequest(HomeworkContext):
-    answer: str = Field(min_length=1, max_length=12000)
+    answer: str = Field(default="", max_length=12000)
+    answer_uploads: list[str] = Field(default_factory=list, max_length=8)
     history: list[Turn] = Field(default_factory=list, max_length=40)
 
 
@@ -305,17 +385,24 @@ class CheckResponse(BaseModel):
     solution: str
     hint: str
     topic_key: str | None
+    read: str = ""  # what was read from the attached photos (kept for later turns)
+    title: str = ""  # a short name for a question that came as pictures
 
 
 @router.post("/homework/check", response_model=CheckResponse)
-async def check_answer(payload: CheckRequest, request: Request, _user: User | None = Depends(require_ai_access)) -> CheckResponse:
-    user = _context(payload, payload.history) + f"\n\n【学生这次交的解答】\n{payload.answer.strip()}"
-    fields = _fields(await _ask(request, _system(CHECK_PROMPT, payload), user, max_tokens=3500))
+async def check_answer(payload: CheckRequest, request: Request, user: User | None = Depends(require_ai_access), db: Session = Depends(get_db)) -> CheckResponse:
+    title = await _prepare(payload, request, db, user)
+    answer, read = await _message(payload.answer, payload.answer_uploads, request, db, user)
+    if not answer:
+        raise HTTPException(status_code=400, detail="先写下或上传你的解答")
+    prompt = _context(payload, payload.history) + f"\n\n【学生这次交的解答】\n{answer}"
+    fields = _fields(await _ask(request, _system(CHECK_PROMPT, payload), prompt, max_tokens=3500))
     verdict = _word(fields, "VERDICT")
     if verdict not in {"correct", "partial", "wrong"}:
         raise HTTPException(status_code=502, detail="AI 没有按格式批改，请重试")
     kind = _word(fields, "KIND")
     return CheckResponse(
+        title=title,
         verdict=verdict,  # type: ignore[arg-type]
         kind=(kind if kind in KINDS else "concept") if verdict != "correct" else None,  # type: ignore[arg-type]
         where=_text(fields, "WHERE") if verdict != "correct" else "",
@@ -324,6 +411,7 @@ async def check_answer(payload: CheckRequest, request: Request, _user: User | No
         solution=_text(fields, "SOLUTION"),
         hint=_text(fields, "HINT") if verdict != "correct" else "",
         topic_key=_topic(fields, payload),
+        read=read,
     )
 
 
@@ -353,6 +441,7 @@ GUIDE_PROMPT = """【引导】学生不会做这道题。像好老师一样一�
 class GuideRequest(HomeworkContext):
     history: list[Turn] = Field(default_factory=list, max_length=40)
     attempt: str = Field(default="", max_length=12000)  # the newest try; empty = just the next hint
+    attempt_uploads: list[str] = Field(default_factory=list, max_length=8)
 
 
 class GuideResponse(BaseModel):
@@ -361,20 +450,26 @@ class GuideResponse(BaseModel):
     hint: str
     done: bool
     topic_key: str | None
+    read: str = ""
+    title: str = ""
 
 
 @router.post("/homework/guide", response_model=GuideResponse)
-async def guide(payload: GuideRequest, request: Request, _user: User | None = Depends(require_ai_access)) -> GuideResponse:
-    user = _context(payload, payload.history)
-    user += f"\n\n【学生最新的尝试】\n{payload.attempt.strip()}" if payload.attempt.strip() else "\n\n（学生没有新的尝试，请给下一条提示）"
-    fields = _fields(await _ask(request, _system(GUIDE_PROMPT, payload), user, max_tokens=1500))
+async def guide(payload: GuideRequest, request: Request, user: User | None = Depends(require_ai_access), db: Session = Depends(get_db)) -> GuideResponse:
+    title = await _prepare(payload, request, db, user)
+    attempt, read = await _message(payload.attempt, payload.attempt_uploads, request, db, user)
+    prompt = _context(payload, payload.history)
+    prompt += f"\n\n【学生最新的尝试】\n{attempt}" if attempt else "\n\n（学生没有新的尝试，请给下一条提示）"
+    fields = _fields(await _ask(request, _system(GUIDE_PROMPT, payload), prompt, max_tokens=1500))
     hint, feedback = _text(fields, "HINT"), _text(fields, "FEEDBACK")
     done = _word(fields, "DONE") == "yes"
     if not hint and not feedback:
         raise HTTPException(status_code=502, detail="AI 没有按格式回答，请重试")
     track = _word(fields, "ONTRACK")
     return GuideResponse(
-        feedback=feedback if payload.attempt.strip() else "",
+        read=read,
+        title=title,
+        feedback=feedback if attempt else "",
         on_track=True if track == "yes" else False if track == "no" else None,
         hint="" if done else hint,
         done=done,
@@ -401,24 +496,31 @@ ASK_PROMPT = """【答疑】学生在做这道题时发来一条消息：可能�
 
 class AskRequest(HomeworkContext):
     history: list[Turn] = Field(default_factory=list, max_length=40)
-    message: str = Field(min_length=1, max_length=12000)
+    message: str = Field(default="", max_length=12000)
+    message_uploads: list[str] = Field(default_factory=list, max_length=8)
 
 
 class AskResponse(BaseModel):
     verdict: Literal["correct", "partial", "wrong"] | None
     reply: str
     topic_key: str | None
+    read: str = ""
+    title: str = ""
 
 
 @router.post("/homework/ask", response_model=AskResponse)
-async def ask(payload: AskRequest, request: Request, _user: User | None = Depends(require_ai_access)) -> AskResponse:
-    user = _context(payload, payload.history) + f"\n\n【学生这条消息】\n{payload.message.strip()}"
-    fields = _fields(await _ask(request, _system(ASK_PROMPT, payload), user, max_tokens=1500))
+async def ask(payload: AskRequest, request: Request, user: User | None = Depends(require_ai_access), db: Session = Depends(get_db)) -> AskResponse:
+    title = await _prepare(payload, request, db, user)
+    message, read = await _message(payload.message, payload.message_uploads, request, db, user)
+    if not message:
+        raise HTTPException(status_code=400, detail="先写下你的问题或想法")
+    prompt = _context(payload, payload.history) + f"\n\n【学生这条消息】\n{message}"
+    fields = _fields(await _ask(request, _system(ASK_PROMPT, payload), prompt, max_tokens=1500))
     reply = _text(fields, "REPLY")
     if not reply:
         raise HTTPException(status_code=502, detail="AI 没有按格式回答，请重试")
     verdict = _word(fields, "VERDICT")
-    return AskResponse(verdict=verdict if verdict in {"correct", "partial", "wrong"} else None, reply=reply, topic_key=_topic(fields, payload))  # type: ignore[arg-type]
+    return AskResponse(verdict=verdict if verdict in {"correct", "partial", "wrong"} else None, reply=reply, topic_key=_topic(fields, payload), read=read, title=title)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -440,7 +542,8 @@ class SolveResponse(BaseModel):
 
 
 @router.post("/homework/solve", response_model=SolveResponse)
-async def solve(payload: HomeworkContext, request: Request, _user: User | None = Depends(require_ai_access)) -> SolveResponse:
+async def solve(payload: HomeworkContext, request: Request, user: User | None = Depends(require_ai_access), db: Session = Depends(get_db)) -> SolveResponse:
+    await _prepare(payload, request, db, user)
     fields = _fields(await _ask(request, _system(SOLVE_PROMPT, payload), _context(payload), max_tokens=3500))
     solution = _text(fields, "SOLUTION")
     if not solution:
@@ -483,9 +586,10 @@ class ConcludeResponse(BaseModel):
 
 
 @router.post("/homework/conclude", response_model=ConcludeResponse)
-async def conclude(payload: ConcludeRequest, request: Request, _user: User | None = Depends(require_ai_access)) -> ConcludeResponse:
-    user = _context(payload, payload.history) + ("\n\n（学生看过完整解答）" if payload.saw_solution else "")
-    fields = _fields(await _ask(request, _system(CONCLUDE_PROMPT, payload), user, max_tokens=1500))
+async def conclude(payload: ConcludeRequest, request: Request, user: User | None = Depends(require_ai_access), db: Session = Depends(get_db)) -> ConcludeResponse:
+    await _prepare(payload, request, db, user)
+    prompt = _context(payload, payload.history) + ("\n\n（学生看过完整解答）" if payload.saw_solution else "")
+    fields = _fields(await _ask(request, _system(CONCLUDE_PROMPT, payload), prompt, max_tokens=1500))
     idea = _text(fields, "IDEA")
     if not idea:
         raise HTTPException(status_code=502, detail="AI 没有按格式总结，请重试")

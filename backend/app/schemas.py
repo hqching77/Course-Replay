@@ -237,6 +237,7 @@ class FileUploadRead(BaseModel):
     id: str
     filename: str
     size: int
+    pages: int | None = None
 
 
 # ---------------------------------------------------------------------------

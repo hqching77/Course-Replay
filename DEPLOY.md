@@ -101,6 +101,7 @@ python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).deco
 | `OPENAI_*`、`STT_*` | 服务器默认的 AI / 语音服务，可留空 |
 | `ALLOW_REGISTRATION` | 朋友都注册好以后可改成 `false`，陌生人就不能再注册 |
 | `ALLOW_CUSTOM_PROVIDERS` | 是否允许用户在设置里用自己的 Key（默认允许） |
+| `CLOUD_DRIVE_HOSTS` | 题目答疑「从网盘选择」允许的网盘域名，逗号分隔（默认 `cloud.tsinghua.edu.cn`，Seafile 共享链接） |
 
 ## 7. 千万别做
 

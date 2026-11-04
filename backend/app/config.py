@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     allow_custom_providers: bool = True
     # Custom provider URLs must resolve to public addresses unless this is on (e.g. a local model in dev).
     allow_private_provider_urls: bool = False
+    # Cloud drives whose share links (/d/… folders, /f/… files) students may pick homework from (Seafile).
+    cloud_drive_hosts: str = "cloud.tsinghua.edu.cn"
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../.env"),

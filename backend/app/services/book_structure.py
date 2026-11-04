@@ -357,6 +357,13 @@ def first_page_title(path: Path) -> str:
         return ""
 
 
+def page_count(path: Path) -> int | None:
+    """Pages in a PDF, 1 for a picture, None for anything else."""
+    if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+        return 1
+    return pdf_pages(path)
+
+
 def pdf_pages(path: Path) -> int | None:
     if path.suffix.lower() != ".pdf":
         return None
