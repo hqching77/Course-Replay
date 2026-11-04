@@ -1,4 +1,4 @@
-import { ArrowLeft, BookOpen, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert, Eye, FileUp, Flag, Lightbulb, ListChecks, PenLine, Plus, RefreshCw, Smartphone, Sparkles, Trash2, X } from 'lucide-react'
+import { ArrowLeft, BookOpen, Bot, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert, Eye, FileUp, Flag, Lightbulb, ListChecks, MessageCircleQuestion, PenLine, Plus, RefreshCw, Smartphone, Sparkles, Trash2, X } from 'lucide-react'
 import QRCode from 'qrcode'
 import { Dispatch, ReactNode, SetStateAction, useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
@@ -16,6 +16,8 @@ type Props = { courses: Course[]; setCourses: SetCourses; notify: (message: stri
 type Store = ReturnType<typeof useHomework>
 
 const LAST_COURSE = 'course-replay-homework-course'
+/** Student working is written one step per line; keep those line breaks (but leave $$…$$ blocks alone). */
+const keepLines = (text: string) => text.split(/(\$\$[\s\S]*?\$\$)/).map((part) => part.startsWith('$$') ? part : part.replace(/([^\n])\n(?!\n)/g, '$1  \n')).join('')
 const verdictText = (verdict: HomeworkCheck['verdict']) => ({ correct: t('正确'), partial: t('部分正确'), wrong: t('错误') }[verdict])
 
 /** /homework: open 题目答疑 for the course used last (or the first one). */
@@ -85,23 +87,37 @@ function ImageStrip({ images, onRemove }: { images: HwImage[]; onRemove?: (id: s
   </div>
 }
 
-/** 拍照 / 上传: uploads, then the AI copies the content into text the student can check and edit. */
-function UploadButtons({ part, account, onDone, notify, disabled }: { part: 'question' | 'answer'; account: boolean; onDone: (images: HwImage[], text: string) => void; notify: (message: string) => void; disabled?: boolean }) {
+type Draft = { text: string; images: HwImage[] }
+const isUploadable = (file: File) => file.type.startsWith('image/') || file.type === 'application/pdf' || /\.(pdf|png|jpe?g|webp|heic|heif)$/i.test(file.name)
+
+/**
+ * Text + pictures in one box: type, take a photo, upload, paste a screenshot (Ctrl/⌘+V) or drop a file.
+ * Pictures are uploaded, then the AI copies what's in them into the text so the student can check and edit it.
+ */
+function InputBox({ part, account, notify, value, onChange, placeholder, label, rows = 6, disabled }: {
+  part: 'question' | 'answer'; account: boolean; notify: (message: string) => void; value: Draft; onChange: (value: Draft) => void; placeholder: string; label: string; rows?: number; disabled?: boolean
+}) {
   const camera = useRef<HTMLInputElement>(null)
   const picker = useRef<HTMLInputElement>(null)
+  const latest = useRef(value)
+  latest.current = value
   const [busy, setBusy] = useState('')
-  const handle = async (list: FileList | null) => {
-    const files = Array.from(list || [])
+  const [preview, setPreview] = useState(false)
+  const [dragging, setDragging] = useState(false)
+
+  const upload = async (list: File[]) => {
+    const files = list.filter(isUploadable).slice(0, 8)
     if (!files.length) return
+    if (!account) { notify(t('登录后可以拍照或上传图片。')); return }
     try {
       setBusy(t('正在上传…'))
       const uploaded: HwImage[] = []
-      for (const file of files.slice(0, 8)) {
+      for (const file of files) {
         const ready = await shrinkImage(file)
         const stored = await filesApi.upload(ready)
         uploaded.push({ id: stored.id, name: file.name, pages: 1 })
       }
-      setBusy(part === 'question' ? t('AI 正在抄题…') : t('AI 正在读你的解答…'))
+      setBusy(part === 'question' ? t('AI 正在抄题…') : t('AI 正在读图…'))
       let text = ''
       try {
         const read = await homeworkApi.read(uploaded.map((image) => image.id), part)
@@ -110,33 +126,42 @@ function UploadButtons({ part, account, onDone, notify, disabled }: { part: 'que
       } catch (error) {
         notify(error instanceof Error ? t('图片已保存，但没读出文字：{error}', { error: error.message }) : t('没读出文字'))
       }
-      onDone(uploaded, text)
+      const current = latest.current
+      onChange({ images: [...current.images, ...uploaded], text: [current.text.trim(), text].filter(Boolean).join('\n\n') })
+      setPreview(false)
     } catch (error) {
       notify(error instanceof Error ? error.message : t('上传失败'))
     } finally {
       setBusy('')
     }
   }
-  if (!account) return <p className="field-hint">{t('登录后可以拍照或上传图片。')}</p>
-  return <div className="hw-upload">
-    <button type="button" className="button secondary compact" disabled={disabled || Boolean(busy)} onClick={() => camera.current?.click()}><Camera size={15} />{t('拍照')}</button>
-    <button type="button" className="button secondary compact" disabled={disabled || Boolean(busy)} onClick={() => picker.current?.click()}><FileUp size={15} />{t('上传图片 / PDF')}</button>
-    {busy && <span className="hw-busy"><RefreshCw className="spin-icon" size={14} />{busy}</span>}
-    <input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={(event) => { void handle(event.target.files); event.target.value = '' }} />
-    <input ref={picker} type="file" accept="image/*,.pdf,.heic,.heif" multiple hidden onChange={(event) => { void handle(event.target.files); event.target.value = '' }} />
-  </div>
-}
+  const locked = disabled || Boolean(busy)
 
-/** Text box with a rendered preview (to check formulas the AI copied from a photo). */
-function TextWithPreview({ value, onChange, placeholder, label, rows = 6 }: { value: string; onChange: (value: string) => void; placeholder: string; label: string; rows?: number }) {
-  const [preview, setPreview] = useState(false)
-  return <div className="hw-text">
-    <div className="hw-text-tabs" role="tablist" aria-label={label}>
-      <button type="button" role="tab" aria-selected={!preview} className={preview ? '' : 'active'} onClick={() => setPreview(false)}><PenLine size={13} />{t('编辑')}</button>
-      <button type="button" role="tab" aria-selected={preview} className={preview ? 'active' : ''} onClick={() => setPreview(true)} disabled={!value.trim()}><Eye size={13} />{t('预览公式')}</button>
+  return <div className={`hw-input ${dragging ? 'dragging' : ''}`}
+    onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); setDragging(true) } }}
+    onDragLeave={() => setDragging(false)}
+    onDrop={(event) => { setDragging(false); if (event.dataTransfer.files.length) { event.preventDefault(); void upload(Array.from(event.dataTransfer.files)) } }}>
+    <div className="hw-input-bar">
+      <div className="hw-text-tabs" role="tablist" aria-label={label}>
+        <button type="button" role="tab" aria-selected={!preview} className={preview ? '' : 'active'} onClick={() => setPreview(false)}><PenLine size={13} />{t('编辑')}</button>
+        <button type="button" role="tab" aria-selected={preview} className={preview ? 'active' : ''} onClick={() => setPreview(true)} disabled={!value.text.trim()}><Eye size={13} />{t('预览公式')}</button>
+      </div>
+      {account && <div className="hw-upload">
+        <button type="button" className="icon-text" disabled={locked} onClick={() => camera.current?.click()}><Camera size={15} />{t('拍照')}</button>
+        <button type="button" className="icon-text" disabled={locked} onClick={() => picker.current?.click()}><FileUp size={15} />{t('上传图片 / PDF')}</button>
+      </div>}
+      <input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={(event) => { void upload(Array.from(event.target.files || [])); event.target.value = '' }} />
+      <input ref={picker} type="file" accept="image/*,.pdf,.heic,.heif" multiple hidden onChange={(event) => { void upload(Array.from(event.target.files || [])); event.target.value = '' }} />
     </div>
-    {preview && value.trim() ? <div className="hw-preview"><Markdown className="on-dark practice-md">{value}</Markdown></div>
-      : <textarea aria-label={label} rows={rows} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />}
+    <ImageStrip images={value.images} onRemove={(id) => onChange({ ...latest.current, images: latest.current.images.filter((image) => image.id !== id) })} />
+    {preview && value.text.trim() ? <div className="hw-preview"><Markdown className="on-dark practice-md">{keepLines(value.text)}</Markdown></div>
+      : <textarea aria-label={label} rows={rows} value={value.text} placeholder={placeholder} disabled={disabled}
+          onChange={(event) => onChange({ ...latest.current, text: event.target.value })}
+          onPaste={(event) => {
+            const files = Array.from(event.clipboardData.files).filter(isUploadable)
+            if (files.length) { event.preventDefault(); void upload(files) }
+          }} />}
+    {busy && <div className="hw-busy"><RefreshCw className="spin-icon" size={14} />{busy}</div>}
   </div>
 }
 
@@ -171,14 +196,21 @@ function CheckCard({ check, showSolution }: { check: HomeworkCheck; showSolution
 }
 
 function StepView({ step, index, steps }: { step: HwStep; index: number; steps: HwStep[] }) {
-  if (step.kind === 'answer' || step.kind === 'attempt') {
+  if (step.kind === 'answer' || step.kind === 'attempt' || step.kind === 'ask') {
     return <div className="hw-step hw-mine">
-      <span className="hw-step-label">{step.kind === 'answer' ? t('我的解答') : t('我的尝试')}</span>
-      {step.text && <Markdown className="on-dark practice-md">{step.text}</Markdown>}
+      <span className="hw-step-label">{step.kind === 'answer' ? t('我的解答') : step.kind === 'attempt' ? t('我的尝试') : t('我的问题 / 想法')}</span>
+      {step.text && <Markdown className="on-dark practice-md">{keepLines(step.text)}</Markdown>}
       <ImageStrip images={step.images || []} />
     </div>
   }
   if (step.kind === 'check' && step.check) return <CheckCard check={step.check} showSolution={step.showSolution} />
+  if (step.kind === 'reply') {
+    const verdict = step.verdict ? { correct: t('想法对'), partial: t('部分对'), wrong: t('想法有问题') }[step.verdict] : ''
+    return <div className={`hw-step hw-reply ${step.verdict || 'question'}`}>
+      <span className="hw-step-label"><Bot size={13} />{t('AI 回复')}{verdict && <em>{verdict}</em>}</span>
+      <Markdown className="on-dark practice-md">{step.text}</Markdown>
+    </div>
+  }
   if (step.kind === 'hint') {
     const number = steps.slice(0, index + 1).filter((item) => item.kind === 'hint').length
     return <div className="hw-step hw-hint"><span className="hw-step-label"><Lightbulb size={13} />{t('提示 {n}', { n: number })}</span><Markdown className="on-dark practice-md">{step.text}</Markdown></div>
@@ -215,7 +247,8 @@ function ProblemView({ course, item, store, setCourses, notify, account }: { cou
   const status = itemStatus(item)
   const check = lastCheck(item)
   const finished = Boolean(item.conclusion)
-  const guiding = item.mode === 'guide'
+  const mode = item.mode || 'check'
+  const setMode = (next: 'check' | 'guide') => { if (next !== mode) void store.update(item.id, (current) => ({ ...current, mode: next })) }
   const lastStep = item.steps[item.steps.length - 1]
   const correctNow = item.solved || (lastStep?.kind === 'check' && lastStep.check?.verdict === 'correct')
   const url = `${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, '')}/courses/${course.id}/homework/${item.id}`
@@ -234,7 +267,7 @@ function ProblemView({ course, item, store, setCourses, notify, account }: { cou
     const answer = item.draft
     const result = await homeworkApi.check(homeworkContext(course, item), answer.text, historyOf(item))
     await store.update(item.id, (current) => ({
-      ...current, mode: current.mode || 'check', draft: { text: '', images: [] },
+      ...current, draft: { text: '', images: [] },
       steps: [...current.steps, step('answer', { text: answer.text, images: answer.images }), step('check', { check: result })],
       topicKey: result.topic_key || current.topicKey, solved: current.solved || result.verdict === 'correct',
     }))
@@ -242,7 +275,7 @@ function ProblemView({ course, item, store, setCourses, notify, account }: { cou
 
   const askHint = () => run(t('想提示中…'), async () => {
     const result = await homeworkApi.guide(homeworkContext(course, item), historyOf(item), '')
-    await store.update(item.id, (current) => ({ ...current, mode: current.mode || 'guide', steps: [...current.steps, ...(result.hint ? [step('hint', { text: result.hint })] : [])], topicKey: result.topic_key || current.topicKey }))
+    await store.update(item.id, (current) => ({ ...current, mode: 'guide', steps: [...current.steps, ...(result.hint ? [step('hint', { text: result.hint })] : [])], topicKey: result.topic_key || current.topicKey }))
   })
 
   const submitAttempt = () => run(t('看你这一步…'), async () => {
@@ -254,6 +287,17 @@ function ProblemView({ course, item, store, setCourses, notify, account }: { cou
       steps: [...current.steps, step('attempt', { text: attempt.text, images: attempt.images }),
         ...(result.feedback ? [step('feedback', { text: result.feedback, onTrack: result.on_track })] : []),
         ...(result.hint ? [step('hint', { text: result.hint })] : [])],
+      topicKey: result.topic_key || current.topicKey,
+    }))
+  })
+
+  const askQuestion = () => run(t('想一想…'), async () => {
+    if (draftEmpty) throw new Error(t('先写下你的问题或想法'))
+    const message = item.draft
+    const result = await homeworkApi.ask(homeworkContext(course, item), historyOf(item), message.text)
+    await store.update(item.id, (current) => ({
+      ...current, draft: { text: '', images: [] },
+      steps: [...current.steps, step('ask', { text: message.text, images: message.images }), step('reply', { text: result.reply, verdict: result.verdict })],
       topicKey: result.topic_key || current.topicKey,
     }))
   })
@@ -291,56 +335,34 @@ function ProblemView({ course, item, store, setCourses, notify, account }: { cou
     navigate(`/courses/${course.id}/homework`)
   }
 
-  const draftBox = (label: string, placeholder: string) => <>
-    <UploadButtons part="answer" account={account} notify={notify} disabled={Boolean(busy)} onDone={(images, text) => setDraft({ images: [...item.draft.images, ...images], text: [item.draft.text.trim(), text].filter(Boolean).join('\n\n') })} />
-    <ImageStrip images={item.draft.images} onRemove={(id) => setDraft({ ...item.draft, images: item.draft.images.filter((image) => image.id !== id) })} />
-    <TextWithPreview label={label} value={item.draft.text} placeholder={placeholder} onChange={(text) => setDraft({ ...item.draft, text })} />
-  </>
-
-  let composer: ReactNode = null
-  if (!finished && !item.steps.length) {
-    composer = <div className="hw-start">
-      <section className="panel hw-card">
-        <div className="hw-card-head"><h3>{t('2 · 我的答案')}</h3>{account && <button type="button" className="button ghost compact hw-qr-toggle" onClick={() => setShowQr((value) => !value)}><Smartphone size={14} />{showQr ? t('收起二维码') : t('用手机 / 平板交答案')}</button>}</div>
-        {showQr && <QrPanel url={url} />}
-        {draftBox(t('我的答案'), t('写下你的解答，或拍照上传'))}
-        <div className="hw-actions"><button className="button primary" disabled={draftEmpty || Boolean(busy)} onClick={() => void submitCheck()}><Check size={16} />{t('批改我的答案')}</button></div>
-      </section>
-      <section className="panel hw-card hw-guide-card">
-        <h3>{t('不会做？')}</h3>
-        <p>{t('一步一步来，每次一条提示。')}</p>
-        <button className="button secondary" disabled={Boolean(busy)} onClick={() => void askHint()}><Sparkles size={16} />{t('带我起步')}</button>
-      </section>
+  const hints = item.steps.filter((value) => value.kind === 'hint').length
+  const canReveal = mode === 'check' ? Boolean(check?.check?.solution && !check.showSolution) : true
+  const composer: ReactNode = finished ? null : <section className="panel hw-card hw-composer">
+    <div className="hw-card-head">
+      <div className="mode-switch hw-mode" role="tablist" aria-label={t('答疑方式')}>
+        <button type="button" role="tab" aria-selected={mode === 'check'} className={mode === 'check' ? 'active' : ''} onClick={() => setMode('check')}><Check size={14} />{t('批改')}</button>
+        <button type="button" role="tab" aria-selected={mode === 'guide'} className={mode === 'guide' ? 'active' : ''} onClick={() => setMode('guide')}><Lightbulb size={14} />{t('提示引导')}</button>
+      </div>
+      {account && <button type="button" className="button ghost compact hw-qr-toggle" onClick={() => setShowQr((value) => !value)}><Smartphone size={14} />{showQr ? t('收起二维码') : t('用手机 / 平板交答案')}</button>}
     </div>
-  } else if (!finished && correctNow) {
-    composer = <section className="panel hw-card hw-done-card"><CheckCircle2 size={20} /><div><strong>{t('做对了！')}</strong><p>{t('写一张总结卡，把这道题的关键和方法记下来。')}</p></div><button className="button primary" disabled={Boolean(busy)} onClick={() => void finish()}><Flag size={16} />{t('结束这道题 · 写总结')}</button></section>
-  } else if (!finished && guiding) {
-    composer = <section className="panel hw-card">
-      <h3>{t('写下你这一步')}</h3>
-      {draftBox(t('你这一步'), t('写下这一步，或拍照上传'))}
-      <div className="hw-actions">
-        <button className="button primary" disabled={draftEmpty || Boolean(busy)} onClick={() => void submitAttempt()}><Check size={16} />{t('提交这一步')}</button>
-        <button className="button secondary" disabled={Boolean(busy)} onClick={() => void askHint()}><Lightbulb size={16} />{t('再给一点提示')}</button>
-        <button className="button ghost" disabled={draftEmpty || Boolean(busy)} onClick={() => void submitCheck()}>{t('我做完了，批改最终答案')}</button>
-        <span />
-        <button className="button ghost" disabled={Boolean(busy)} onClick={() => void showSolution()}><Eye size={16} />{t('看完整解答')}</button>
-        <button className="button ghost" disabled={Boolean(busy)} onClick={() => void finish()}><Flag size={16} />{t('结束这道题')}</button>
-      </div>
-    </section>
-  } else if (!finished) {
-    composer = <section className="panel hw-card">
-      <h3>{t('改一改，再交一次')}</h3>
-      {draftBox(t('改过的答案'), t('改好后再交一次'))}
-      <div className="hw-actions">
-        <button className="button primary" disabled={draftEmpty || Boolean(busy)} onClick={() => void submitCheck()}><Check size={16} />{t('再交一次')}</button>
-        <button className="button secondary" disabled={Boolean(busy)} onClick={() => void askHint()}><Lightbulb size={16} />{t('给我提示')}</button>
-        <span />
-        <button className="button ghost" disabled={Boolean(busy)} onClick={() => void showSolution()}><Eye size={16} />{t('看完整步骤')}</button>
-        <button className="button ghost" disabled={Boolean(busy)} onClick={() => void finish()}><Flag size={16} />{t('结束这道题')}</button>
-      </div>
-      {check?.check?.hint && <div className="hw-fix-hint"><Lightbulb size={13} /><Markdown className="on-dark">{check.check.hint}</Markdown></div>}
-    </section>
-  }
+    {showQr && <QrPanel url={url} />}
+    <InputBox part="answer" account={account} notify={notify} disabled={Boolean(busy)} value={item.draft} onChange={setDraft} label={mode === 'check' ? t('我的答案') : t('你这一步')}
+      placeholder={mode === 'check' ? t('写下你的解答或想法，也可以粘贴截图、拍照上传') : t('写下这一步或你的想法，也可以粘贴截图、拍照上传')} />
+    <div className="hw-actions">
+      {mode === 'check'
+        ? <button className="button primary" disabled={draftEmpty || Boolean(busy)} onClick={() => void submitCheck()}><Check size={16} />{check ? t('再交一次') : t('提交批改')}</button>
+        : <>
+          <button className="button primary" disabled={draftEmpty || Boolean(busy)} onClick={() => void submitAttempt()}><Check size={16} />{t('提交这一步')}</button>
+          <button className="button secondary" disabled={Boolean(busy)} onClick={() => void askHint()}><Sparkles size={16} />{hints ? t('再给一点提示') : t('带我起步')}</button>
+        </>}
+      <button className="button secondary" disabled={draftEmpty || Boolean(busy)} onClick={() => void askQuestion()} title={t('问问这个想法对不对，或者问一个概念')}><MessageCircleQuestion size={16} />{t('问一问')}</button>
+      <span />
+      {canReveal && <button className="button ghost" disabled={Boolean(busy)} onClick={() => void showSolution()}><Eye size={16} />{mode === 'check' ? t('看完整步骤') : t('看完整解答')}</button>}
+      {item.steps.length > 0 && !correctNow && <button className="button ghost" disabled={Boolean(busy)} onClick={() => void finish()}><Flag size={16} />{t('结束这道题')}</button>}
+    </div>
+    {mode === 'check' && lastStep?.kind === 'check' && check?.check?.hint && <div className="hw-fix-hint"><Lightbulb size={13} /><Markdown className="on-dark">{check.check.hint}</Markdown></div>}
+  </section>
+  const doneCard = !finished && correctNow ? <section className="panel hw-card hw-done-card"><CheckCircle2 size={20} /><div><strong>{t('做对了！')}</strong><p>{t('写一张总结卡，把这道题的关键和方法记下来。')}</p></div><button className="button primary" disabled={Boolean(busy)} onClick={() => void finish()}><Flag size={16} />{t('结束这道题 · 写总结')}</button></section> : null
 
   return <div className="hw-problem">
     <section className="panel hw-card hw-question">
@@ -351,12 +373,13 @@ function ProblemView({ course, item, store, setCourses, notify, account }: { cou
         </div></div>
       <ImageStrip images={item.question.images} />
       {editing ? <>
-        <TextWithPreview label={t('题目')} value={questionText} onChange={setQuestionText} placeholder={t('题目')} />
+        <InputBox part="question" account={account} notify={notify} label={t('题目')} value={{ text: questionText, images: [] }} onChange={(value) => setQuestionText(value.text)} placeholder={t('题目')} />
         <div className="hw-actions"><button className="button ghost compact" onClick={() => setEditing(false)}>{t('取消')}</button><button className="button primary compact" disabled={!questionText.trim()} onClick={saveQuestion}>{t('保存')}</button></div>
       </> : item.question.text.trim() ? <Markdown className="on-dark practice-md">{item.question.text}</Markdown> : <p className="field-hint">{t('题目只有图片。')}</p>}
     </section>
     {item.steps.length > 0 && <div className="hw-steps">{item.steps.map((value, index) => <StepView key={value.id} step={value} index={index} steps={item.steps} />)}</div>}
     {busy && <div className="hw-thinking"><span className="mini-spinner" />{busy}</div>}
+    {doneCard}
     {composer}
     {item.conclusion && <ConclusionCard item={item} course={course} />}
     {item.conclusion && <div className="hw-actions"><Link className="button secondary" to={`/courses/${course.id}/homework/new`}><Plus size={16} />{t('再交一道题')}</Link></div>}
@@ -369,8 +392,8 @@ function ProblemView({ course, item, store, setCourses, notify, account }: { cou
 
 function NewProblem({ course, store, notify, account }: { course: Course; store: Store; notify: Props['notify']; account: boolean }) {
   const navigate = useNavigate()
-  const [text, setText] = useState('')
-  const [images, setImages] = useState<HwImage[]>([])
+  const [draft, setDraft] = useState<Draft>({ text: '', images: [] })
+  const { text, images } = draft
   const [saving, setSaving] = useState(false)
   const save = async () => {
     if (!text.trim() && !images.length) return
@@ -387,9 +410,7 @@ function NewProblem({ course, store, notify, account }: { course: Course; store:
   }
   return <section className="panel hw-card hw-new">
     <h3>{t('1 · 题目')}</h3>
-    <UploadButtons part="question" account={account} notify={notify} onDone={(added, read) => { setImages((current) => [...current, ...added]); setText((current) => [current.trim(), read].filter(Boolean).join('\n\n')) }} />
-    <ImageStrip images={images} onRemove={(id) => setImages((current) => current.filter((image) => image.id !== id))} />
-    <TextWithPreview label={t('题目')} value={text} onChange={setText} rows={8} placeholder={t('输入题目，或拍照 / 上传图片、PDF')} />
+    <InputBox part="question" account={account} notify={notify} label={t('题目')} rows={8} value={draft} onChange={setDraft} placeholder={t('输入题目，也可以粘贴截图、拍照或上传图片 / PDF')} />
     <div className="hw-actions"><button className="button primary" disabled={(!text.trim() && !images.length) || saving} onClick={() => void save()}>{saving ? <RefreshCw className="spin-icon" size={16} /> : <Check size={16} />}{t('保存题目')}</button></div>
   </section>
 }

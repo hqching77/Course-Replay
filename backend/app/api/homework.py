@@ -206,11 +206,14 @@ class HomeworkContext(BaseModel):
 
 
 class Turn(BaseModel):
-    role: Literal["answer", "check", "hint", "attempt", "feedback", "solution"]
+    role: Literal["answer", "check", "hint", "attempt", "feedback", "solution", "ask", "reply"]
     text: str = Field(max_length=8000)
 
 
-ROLE_LABEL = {"answer": "学生的解答", "check": "批改结果", "hint": "提示", "attempt": "学生的尝试", "feedback": "对尝试的反馈", "solution": "完整解答"}
+ROLE_LABEL = {
+    "answer": "学生的解答", "check": "批改结果", "hint": "提示", "attempt": "学生的尝试", "feedback": "对尝试的反馈",
+    "solution": "完整解答", "ask": "学生的问题 / 想法", "reply": "你的回答",
+}
 
 
 def _context(payload: HomeworkContext, history: list[Turn] | None = None) -> str:
@@ -377,6 +380,45 @@ async def guide(payload: GuideRequest, request: Request, _user: User | None = De
         done=done,
         topic_key=_topic(fields, payload),
     )
+
+
+# ---------------------------------------------------------------------------
+# The student's own question or idea ("is my approach right?")
+# ---------------------------------------------------------------------------
+
+ASK_PROMPT = """【答疑】学生在做这道题时发来一条消息：可能是他的思路 / 做法（问对不对），也可能是一个问题。
+- 如果是思路或做法：先判断对不对（VERDICT 写 correct / partial / wrong），再说明为什么；对的话告诉他接下来往哪个方向想，错的话指出问题在哪；
+- 如果是概念或“为什么”之类的问题：直接讲清楚，VERDICT 写 none；
+- 除非他在这条消息里明确要求，否则不要给出完整解答，也不要说出最终答案；
+- 结合课程笔记和他之前的过程，2-6 句话，公式用 LaTeX。
+严格按格式输出：
+@@VERDICT <correct/partial/wrong/none>
+@@REPLY
+你的回答
+@@TOPIC <key 或 none>
+@@END"""
+
+
+class AskRequest(HomeworkContext):
+    history: list[Turn] = Field(default_factory=list, max_length=40)
+    message: str = Field(min_length=1, max_length=12000)
+
+
+class AskResponse(BaseModel):
+    verdict: Literal["correct", "partial", "wrong"] | None
+    reply: str
+    topic_key: str | None
+
+
+@router.post("/homework/ask", response_model=AskResponse)
+async def ask(payload: AskRequest, request: Request, _user: User | None = Depends(require_ai_access)) -> AskResponse:
+    user = _context(payload, payload.history) + f"\n\n【学生这条消息】\n{payload.message.strip()}"
+    fields = _fields(await _ask(request, _system(ASK_PROMPT, payload), user, max_tokens=1500))
+    reply = _text(fields, "REPLY")
+    if not reply:
+        raise HTTPException(status_code=502, detail="AI 没有按格式回答，请重试")
+    verdict = _word(fields, "VERDICT")
+    return AskResponse(verdict=verdict if verdict in {"correct", "partial", "wrong"} else None, reply=reply, topic_key=_topic(fields, payload))  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

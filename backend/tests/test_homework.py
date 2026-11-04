@@ -146,3 +146,20 @@ def test_solution_on_request_and_conclusion(client, ai):
     assert card["solved"] is True and card["kind"] == "calc" and card["topic_key"] == "s1:n2" and card["method"].startswith("- 先算")
     peeked = client.post("/api/homework/conclude", json={**BASE, "history": history, "saw_solution": True}, headers=hq).json()
     assert peeked["solved"] is False
+
+
+def test_student_can_ask_whether_their_idea_is_right(client, ai):
+    calls, replies = ai
+    hq = auth_header(register(client, "hw-ask").json()["token"])
+    replies["【答疑】"] = "@@VERDICT partial\n@@REPLY\n方向对：先求 $\\det A$。但不需要特征值。\n@@TOPIC s1:n2\n@@END"
+    history = [{"role": "hint", "text": "先求行列式"}, {"role": "ask", "text": "要用伴随矩阵吗"}, {"role": "reply", "text": "要"}]
+    result = client.post("/api/homework/ask", json={**BASE, "history": history, "message": "我打算先求特征值，再求逆，对吗？"}, headers=hq).json()
+    assert result == {"verdict": "partial", "reply": "方向对：先求 $\\det A$。但不需要特征值。", "topic_key": "s1:n2"}
+    system, user = calls[-1][0]["content"], calls[-1][1]["content"]
+    assert "除非他在这条消息里明确要求" in system
+    assert "【学生的问题 / 想法】\n要用伴随矩阵吗" in user and "【学生这条消息】\n我打算先求特征值" in user
+
+    replies["【答疑】"] = "@@VERDICT none\n@@REPLY\n伴随矩阵是代数余子式矩阵的转置。\n@@TOPIC none\n@@END"
+    result = client.post("/api/homework/ask", json={**BASE, "message": "什么是伴随矩阵？"}, headers=hq).json()
+    assert result["verdict"] is None and result["topic_key"] is None
+    assert client.post("/api/homework/ask", json={**BASE, "message": ""}, headers=hq).status_code == 422

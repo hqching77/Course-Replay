@@ -186,6 +186,9 @@ All AI output uses the `@@TAG` text format rather than JSON, so LaTeX can't brea
   - the summary card has the key idea, the method to reuse, and where the student got stuck;
   - 自己做出来了 only counts if the solution wasn't viewed;
   - the result goes through the same `recordAnswer` as everything else (source 作业), so it shows in 薄弱点, 知识档案 and the exam plan, linked to the knowledge point the AI picked from the course's list.
+- **One input box:** type, take a photo, upload a file, paste a screenshot (Ctrl/⌘+V) or drag a file in. Pictures are copied into the text so the student can check them.
+- **Switching modes:** a 批改 / 提示引导 switch above the input, available at any point in a problem.
+- **问一问** (`/ask`): the student sends an idea or a question. The AI judges the idea (想法对 / 部分对 / 想法有问题) or answers the question, without giving the full solution unless that message asks for it.
 - **Context for the AI:** the two best-matching notes from the course, the course's knowledge-point list, and the 知识档案. The correct answer from marking is kept out of the hint history so hints can't give it away.
 
 ## Order

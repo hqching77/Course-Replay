@@ -270,7 +270,8 @@ export const filesApi = {
 export interface HomeworkRecord { id: string; course_id: string; data: Record<string, unknown>; version: number; updated_at: string }
 export interface HomeworkTopic { key: string; title: string }
 export interface HomeworkContext { course_title: string; question: string; reference: string; topics: HomeworkTopic[]; learner_memory: string }
-export type HomeworkTurn = { role: 'answer' | 'check' | 'hint' | 'attempt' | 'feedback' | 'solution'; text: string }
+export type HomeworkTurn = { role: 'answer' | 'check' | 'hint' | 'attempt' | 'feedback' | 'solution' | 'ask' | 'reply'; text: string }
+export interface HomeworkReply { verdict: 'correct' | 'partial' | 'wrong' | null; reply: string; topic_key: string | null }
 export type MistakeKindValue = 'concept' | 'start' | 'calc' | 'careless'
 export interface HomeworkCheck { verdict: 'correct' | 'partial' | 'wrong'; kind: MistakeKindValue | null; where: string; why: string; answer: string; solution: string; hint: string; topic_key: string | null }
 export interface HomeworkGuide { feedback: string; on_track: boolean | null; hint: string; done: boolean; topic_key: string | null }
@@ -287,6 +288,8 @@ export const homeworkApi = {
     apiFetch<HomeworkCheck>('/api/homework/check', { ai: true, json: { ...context, answer, history } }),
   guide: (context: HomeworkContext, history: HomeworkTurn[], attempt: string) =>
     apiFetch<HomeworkGuide>('/api/homework/guide', { ai: true, json: { ...context, history, attempt } }),
+  ask: (context: HomeworkContext, history: HomeworkTurn[], message: string) =>
+    apiFetch<HomeworkReply>('/api/homework/ask', { ai: true, json: { ...context, history, message } }),
   solve: (context: HomeworkContext) => apiFetch<{ solution: string; answer: string }>('/api/homework/solve', { ai: true, json: context }),
   conclude: (context: HomeworkContext, history: HomeworkTurn[], sawSolution: boolean) =>
     apiFetch<HomeworkConclusion>('/api/homework/conclude', { ai: true, json: { ...context, history, saw_solution: sawSolution } }),

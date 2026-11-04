@@ -12,7 +12,7 @@ import { learnerMemory } from './memory'
 import { sectionNodes } from './study'
 
 export interface HwImage { id: string; name: string; pages: number }
-export type HwStepKind = 'answer' | 'check' | 'hint' | 'attempt' | 'feedback' | 'solution'
+export type HwStepKind = 'answer' | 'check' | 'hint' | 'attempt' | 'feedback' | 'solution' | 'ask' | 'reply'
 
 export interface HwStep {
   id: string
@@ -25,6 +25,8 @@ export interface HwStep {
   onTrack?: boolean | null
   /** On a check: the student chose to see the full steps. */
   showSolution?: boolean
+  /** On a reply: whether the student's idea was right (null = it was a question). */
+  verdict?: 'correct' | 'partial' | 'wrong' | null
 }
 
 export interface HwItem {
@@ -100,6 +102,7 @@ export function historyOf(item: HwItem): HomeworkTurn[] {
       const { verdict, where, why } = step.check
       return { role: 'check', text: `${verdict}${where ? `；第一处错误：${where}` : ''}${why ? `；${why}` : ''}` } // i18n-ok: AI prompt text
     }
+    if (step.kind === 'reply' && step.verdict) return { role: 'reply', text: `（${step.verdict}）${step.text}` } // i18n-ok: AI prompt text
     return { role: step.kind as HomeworkTurn['role'], text: step.text }
   }).slice(-30)
 }
